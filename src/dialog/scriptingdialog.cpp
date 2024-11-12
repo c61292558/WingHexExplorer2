@@ -33,6 +33,7 @@
 #include "qeditor.h"
 #include "qformatscheme.h"
 #include "qlinemarksinfocenter.h"
+#include "settings/clangformatsetdialog.h"
 
 #include <QDesktopServices>
 #include <QHeaderView>
@@ -508,8 +509,13 @@ RibbonTabContent *ScriptingDialog::buildSettingPage(RibbonTabContent *tab) {
     auto pannel = tab->addGroup(tr("Settings"));
 
     addPannelAction(pannel, QStringLiteral("file"), tr("Editor"),
-                    &ScriptingDialog::on_setting);
-
+                    [=] { m_setdialog->showConfig(QStringLiteral("Edit")); });
+    addPannelAction(pannel, QStringLiteral("snippt"), tr("Snippets"), [=] {
+        m_setdialog->showConfig(QStringLiteral("Snippets"));
+    });
+    addPannelAction(
+        pannel, QStringLiteral("codeformat"), tr("ClangFormat"),
+        [=] { m_setdialog->showConfig(QStringLiteral("ClangFormat")); });
     return tab;
 }
 
@@ -954,6 +960,9 @@ void ScriptingDialog::buildUpSettingDialog() {
         new QSnippetEdit(LangService::instance().snippetManager(), m_setdialog);
     m_setdialog->addPage(snip);
 
+    auto clang = new ClangFormatSetDialog(m_setdialog);
+    m_setdialog->addPage(clang);
+
     m_setdialog->build();
 }
 
@@ -1238,8 +1247,6 @@ void ScriptingDialog::on_gotoline() {
         e->editor()->gotoLine();
     }
 }
-
-void ScriptingDialog::on_setting() { m_setdialog->showConfig(); }
 
 void ScriptingDialog::on_about() { AboutSoftwareDialog().exec(); }
 

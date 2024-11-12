@@ -227,7 +227,6 @@ private slots:
     void on_replace();
     void on_gotoline();
 
-    void on_setting();
     void on_about();
     void on_sponsor();
     void on_wiki();

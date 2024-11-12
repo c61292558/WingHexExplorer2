@@ -19,6 +19,7 @@
 
 #include <QFont>
 
+#include "class/clangformatmanager.h"
 #include "class/logger.h"
 #include "languagemanager.h"
 #include "settingmanager.h"
@@ -58,6 +59,7 @@ AppManager::AppManager(int &argc, char *argv[])
 
     SkinManager::instance();
     LanguageManager::instance();
+    ClangFormatManager::instance();
 
     _w = new MainWindow;
 
