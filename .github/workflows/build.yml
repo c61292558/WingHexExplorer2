@@ -42,7 +42,7 @@ jobs:
     - name: Install dependencies
       run: |
         sudo docker exec qtbuilder bash -c "apt update && \
-          apt install -y  cmake qt5-default  build-essential git && \
+          apt install -y  cmake qt5-default qttools5-dev-tools  build-essential git && \
           apt clean"
 
     - name: Compile project
