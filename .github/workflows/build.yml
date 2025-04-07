@@ -2,7 +2,7 @@ name: Build and Release
 
 on:
   push:
-   标签:
+   tags:
       - 'v*'  # 触发条件设置为tag推送
 
 jobs:
