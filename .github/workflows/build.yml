@@ -17,8 +17,12 @@ jobs:
       uses: actions/checkout@v4
       with:
         fetch-depth: 0  # 获取完整提交历史用于版本检测
-        仓库: c61292558/WingHexExplorer2
+        repository: c61292558/WingHexExplorer2
         token: ${{ secrets.GITHUB_TOKEN }}  # 显式传递自动生成的令牌
+
+    - name: List files
+      run: ls -la
+      
     - name: Setup Docker
       run: |
         sudo systemctl start docker
