@@ -2,9 +2,9 @@ name: Build and Release
 
 on:
   push:
-   tags:
-      - 'v*'  # 触发条件设置为tag推送
-
+   branches:
+     - main
+      
 jobs:
   build-and-release:
     runs-on: ubuntu-latest
