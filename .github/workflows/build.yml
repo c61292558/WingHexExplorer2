@@ -1,0 +1,66 @@
+name: Build and Release
+
+on:
+  push:
+   标签:
+      - 'v*'  # 触发条件设置为tag推送
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write  # 需要写入Release的权限
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0  # 获取完整提交历史用于版本检测
+
+    - name: Setup Docker
+      run: |
+        sudo systemctl start docker
+        sudo docker info
+
+    - name: Build Docker container
+      run: |
+        sudo docker run -dit \
+          --name qtbuilder \
+          -v ${{ github.workspace }}:/workspace \
+          linuxdeepin/apricot
+
+    - name: Install dependencies
+      run: |
+        sudo docker exec qtbuilder bash -c "apt update && \
+          apt install -y qt5-default build-essential git && \
+          apt clean"
+
+    - name: Compile project
+      run: |
+        sudo docker exec qtbuilder bash -c "cd /workspace && \
+          mkdir -p build && \
+          cd build && \
+          qmake .. && \
+          make -j$(nproc)"
+
+    - name: Get version info
+      id: version
+      run: |
+        # 提取最新的tag作为版本号
+        VERSION=$(git describe --tags --abbrev=0)
+        echo "version=${VERSION}" >> $GITHUB_OUTPUT
+
+    - name: Create Release
+      id: create_release
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: ${{ steps.version.outputs.version }}
+        name: "Release ${{ steps.version.outputs.version }}"
+        draft: false
+        prerelease: false
+        files: |
+          build/*.app    # 应用程序文件
+          build/*.so     # 动态库文件
+          build/*.dmg    # macOS安装包
+          build/*.exe    # Windows可执行文件
