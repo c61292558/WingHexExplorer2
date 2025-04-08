@@ -57,8 +57,8 @@ jobs:
         sudo docker exec qtbuilder bash -c "cd /workspace && \
         mkdir -p build && \
         cd build && \
-        cmake .. && \   # 生成 Makefile
-        make -j$(nproc)" # 编译
+        cmake --debug-output .. && \   # 生成 Makefile
+        make -j$(nproc) VERBOSE=1"# 编译
         
     - name: Print qmsetup build log on failure
       if: failure()
