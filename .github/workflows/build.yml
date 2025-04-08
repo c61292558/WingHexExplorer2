@@ -57,6 +57,10 @@ jobs:
         cd build && \
         cmake .. && \   # 生成 Makefile
         make -j$(nproc)" # 编译
+        
+    - name: Print qmsetup build log on failure
+      if: failure()
+      run: cat /workspace/build/_build/qmsetup_build-Release.log
 
     - name: Get version info
       id: version
