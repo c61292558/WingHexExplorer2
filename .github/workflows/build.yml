@@ -80,7 +80,7 @@ jobs:
 
     - name: List files2
       if: failure()  # 仅在失败时运行
-      run: ls -l ${{ github.workspace }} &&cd /CMakeFiles && ls -l&& cat /CMakeFiles/CMakeOutput.log
+      run: ls -l ${{ github.workspace }} && cd /build/CMakeFiles && ls -l && cat /build/CMakeFiles/CMakeOutput.log
       
     - name: Upload build logs
       if: failure()  # 仅在失败时运行
