@@ -67,6 +67,7 @@ jobs:
         git \
         ninja-build \
         && apt clean"
+        
 
     - name: Compile project
       run: |
@@ -77,7 +78,9 @@ jobs:
         make -j$(nproc) VERBOSE=1"# 编译
 
 
-
+    - name: List files2
+      run: ls -la
+          
     - name: Upload build logs
       if: failure()  # 仅在失败时运行
       uses: actions/upload-artifact@v4
