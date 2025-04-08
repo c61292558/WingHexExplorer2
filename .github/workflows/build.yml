@@ -20,9 +20,10 @@ jobs:
         repository: c61292558/WingHexExplorer2
         token: ${{ secrets.GITHUB_TOKEN }}  # 显式传递自动生成的令牌
         
-    - name: Checkout submodules
-      run: |
-        git submodule update --init --recursive
+    - name: Checkout code submodules
+      uses: actions/checkout@v4
+      with:
+        submodules: 'recursive'
 
     - name: List files
       run: ls -la
