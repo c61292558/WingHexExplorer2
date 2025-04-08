@@ -47,10 +47,26 @@ jobs:
     - name: Install dependencies
       run: |
         sudo docker exec qtbuilder bash -c "apt update && \
-        apt install -y cmake qtbase5-dev qt5-default qttools5-dev qttools5-dev-tools \
-        libgl1-mesa-dev libx11-dev libxcb1-dev libxext-dev libxfixes-dev libxi-dev \
-        build-essential git && \
-        apt clean"
+        apt install -y \
+        cmake \
+        qtbase5-dev \
+        qttools5-dev \
+        qttools5-dev-tools \
+        libqt5svg5-dev \
+        libqt5x11extras5-dev \
+        libgl1-mesa-dev \
+        libx11-dev \
+        libxcb1-dev \
+        libxext-dev \
+        libxfixes-dev \
+        libxi-dev \
+        libxrender-dev \
+        libxkbcommon-dev \
+        libwayland-dev \
+        build-essential \
+        git \
+        ninja-build \
+        && apt clean"
 
     - name: Compile project
       run: |
