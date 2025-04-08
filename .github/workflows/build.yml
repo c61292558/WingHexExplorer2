@@ -80,7 +80,7 @@ jobs:
 
     - name: Upload build logs
       if: failure()  # 仅在失败时运行
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: qmsetup-build-log
         path: |
