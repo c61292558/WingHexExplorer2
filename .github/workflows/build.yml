@@ -74,7 +74,7 @@ jobs:
         sudo docker exec qtbuilder bash -c "cd /workspace && \
         mkdir -p build && \
         cd build && \
-        cmake --debug-output .. && \   # 生成 Makefile
+        cmake -DCMAKE_CXX_STANDARD=20 --debug-output .. && \   # 生成 Makefile  
         make -j$(nproc) VERBOSE=1"# 编译
 
 
