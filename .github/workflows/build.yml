@@ -80,8 +80,8 @@ jobs:
 
     - name: List files2
       if: failure()  # 仅在失败时运行
-      run: ls -l workspace
-          
+      run: ls -l ${{ github.workspace }}
+      
     - name: Upload build logs
       if: failure()  # 仅在失败时运行
       uses: actions/upload-artifact@v4
