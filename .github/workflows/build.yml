@@ -39,7 +39,12 @@ jobs:
           --name qtbuilder \
           -v ${{ github.workspace }}:/workspace \
           linuxdeepin/apricot
-    
+          
+    - name: Check compiler version
+      run: |
+        sudo docker exec qtbuilder bash -c "g++ --version"
+        sudo docker exec qtbuilder bash -c "gcc --version"
+
     - name: Check CMakeLists.txt in container
       run: 
         sudo docker exec qtbuilder ls -la /workspace/CMakeLists.txt
