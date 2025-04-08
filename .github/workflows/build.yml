@@ -79,6 +79,7 @@ jobs:
 
 
     - name: List files2
+      if: failure()  # 仅在失败时运行
       run: ls -la
           
     - name: Upload build logs
