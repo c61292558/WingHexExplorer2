@@ -80,7 +80,7 @@ jobs:
 
     - name: List files2
       if: failure()  # 仅在失败时运行
-      run: ls -la
+      run: ls -l workspace
           
     - name: Upload build logs
       if: failure()  # 仅在失败时运行
