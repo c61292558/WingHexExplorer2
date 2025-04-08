@@ -75,10 +75,21 @@ jobs:
         cd build && \
         cmake --debug-output .. && \   # 生成 Makefile
         make -j$(nproc) VERBOSE=1"# 编译
-        
-    - name: Print qmsetup build log on failure
-      if: failure()
-      run: cat /workspace/build/_build/qmsetup_build-Release.log
+
+
+
+    - name: Upload build logs
+      if: failure()  # 仅在失败时运行
+      uses: actions/upload-artifact@v3
+      with:
+        name: qmsetup-build-log
+        path: |
+          ./qmsetup_build.log
+        if-no-files-found: warn  # 如果文件不存在仅警告
+
+    # - name: Print qmsetup build log on failure
+    #   if: failure()
+    #   run: cat /workspace/build/_build/qmsetup_build-Release.log
 
     - name: Get version info
       id: version
