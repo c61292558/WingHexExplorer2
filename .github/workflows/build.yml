@@ -40,10 +40,7 @@ jobs:
           -v ${{ github.workspace }}:/workspace \
           linuxdeepin/apricot
           
-    - name: Check compiler version
-      run: |
-        sudo docker exec qtbuilder bash -c "g++ --version"
-        sudo docker exec qtbuilder bash -c "gcc --version"
+    
 
     - name: Check CMakeLists.txt in container
       run: 
@@ -73,6 +70,10 @@ jobs:
         ninja-build \
         && apt clean"
         
+    - name: Check compiler version
+      run: |
+        sudo docker exec qtbuilder bash -c "g++ --version"
+        sudo docker exec qtbuilder bash -c "gcc --version"
 
     - name: Compile project
       run: |
