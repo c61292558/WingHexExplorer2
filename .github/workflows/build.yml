@@ -80,7 +80,7 @@ jobs:
 
     - name: List files2
       if: failure()  # 仅在失败时运行
-      run: ls -l ${{ github.workspace }} && cat /build/CMakeFiles/CMakeOutput.log
+      run: ls -l ${{ github.workspace }} &&cd /CMakeFiles && ls -l&& cat /CMakeFiles/CMakeOutput.log
       
     - name: Upload build logs
       if: failure()  # 仅在失败时运行
@@ -93,7 +93,7 @@ jobs:
 
     # - name: Print qmsetup build log on failure
     #   if: failure()
-    #   run: cat /workspace/build/_build/qmsetup_build-Release.log
+    #   run: cat /build/_build/qmsetup_build-Release.log
 
     - name: Get version info
       id: version
