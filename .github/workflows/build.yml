@@ -68,6 +68,19 @@ jobs:
         build-essential \
         git \
         ninja-build \
+        apt install -y build-essential && \
+        apt install -y wget && \
+        # 下载GCC 11.3源码包
+        wget https://ftp.gnu.org/gnu/gcc/gcc-11.3.0/gcc-11.3.0.tar.gz && \
+        tar -xzf gcc-11.3.0.tar.gz && \
+        cd gcc-11.3.0 && \
+        ./contrib/download_prerequisites && \
+        mkdir build && cd build && \
+        ../configure --prefix=/usr/local/gcc-11 --enable-languages=c,c++ --disable-multilib && \
+        make -j$(nproc) && \
+        make install && \
+        ln -s /usr/local/gcc-11/bin/g++ /usr/local/bin/g++-11 && \
+        ln -s /usr/local/gcc-11/bin/gcc /usr/local/bin/gcc-11 \
         && apt clean"
         
     - name: Check compiler version
