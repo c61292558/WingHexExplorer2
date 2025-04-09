@@ -48,40 +48,55 @@ jobs:
     
     - name: Install dependencies
       run: |
-        sudo docker exec qtbuilder bash -c "apt update && \
+        sudo docker exec qtbuilder bash -c "
+        # 第一阶段：安装基础编译工具
+        apt update -y && \
         apt install -y \
-        cmake \
-        qtbase5-dev \
-        qttools5-dev \
-        qttools5-dev-tools \
-        libqt5svg5-dev \
-        libqt5x11extras5-dev \
-        libgl1-mesa-dev \
-        libx11-dev \
-        libxcb1-dev \
-        libxext-dev \
-        libxfixes-dev \
-        libxi-dev \
-        libxrender-dev \
-        libxkbcommon-dev \
-        libwayland-dev \
-        build-essential \
-        git \
-        ninja-build \
-        apt install -y build-essential && \
-        apt install -y wget && \
-        # 下载GCC 11.3源码包
+          cmake \
+          qtbase5-dev \
+          qttools5-dev \
+          qttools5-dev-tools \
+          libqt5svg5-dev \
+          libqt5x11extras5-dev \
+          libgl1-mesa-dev \
+          libx11-dev \
+          libxcb1-dev \
+          libxext-dev \
+          libxfixes-dev \
+          libxi-dev \
+          libxrender-dev \
+          libxkbcommon-dev \
+          libwayland-dev \
+          build-essential \
+          git \
+          ninja-build \
+          wget \
+          gcc-8 \
+          g++-8 \
+          libgmp-dev \
+          libmpfr-dev \
+          libmpc-dev \
+          flex \
+          bison \
+          && apt clean
+    
+        # 第二阶段：编译安装GCC 11
+        cd /tmp && \
         wget https://ftp.gnu.org/gnu/gcc/gcc-11.3.0/gcc-11.3.0.tar.gz && \
         tar -xzf gcc-11.3.0.tar.gz && \
         cd gcc-11.3.0 && \
         ./contrib/download_prerequisites && \
         mkdir build && cd build && \
-        ../configure --prefix=/usr/local/gcc-11 --enable-languages=c,c++ --disable-multilib && \
+        ../configure \
+          --prefix=/usr/local/gcc-11 \
+          --enable-languages=c,c++ \
+          --disable-multilib \
+          --program-suffix=-11 && \
         make -j$(nproc) && \
         make install && \
-        ln -s /usr/local/gcc-11/bin/g++ /usr/local/bin/g++-11 && \
-        ln -s /usr/local/gcc-11/bin/gcc /usr/local/bin/gcc-11 \
-        && apt clean"
+        ln -sf /usr/local/gcc-11/bin/g++-11 /usr/bin/g++ && \
+        ln -sf /usr/local/gcc-11/bin/gcc-11 /usr/bin/gcc
+        "
         
     - name: Check compiler version
       run: |
