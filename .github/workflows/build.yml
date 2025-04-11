@@ -110,7 +110,7 @@ jobs:
         mkdir -p build && \
         cd build && \
         cmake -DCMAKE_CXX_STANDARD=20 --debug-output .. && \   # 生成 Makefile  
-        make -j$(nproc) VERBOSE=1"# 编译
+        make  VERBOSE=1"# 编译
 
 
     - name: List files2
