@@ -72,8 +72,8 @@ jobs:
           git \
           ninja-build \
           wget \
-          gcc-8 \
-          g++-8 \
+          # gcc-8 \
+          # g++-8 \
           libgmp-dev \
           libmpfr-dev \
           libmpc-dev \
@@ -82,21 +82,21 @@ jobs:
           && apt clean
     
         # 第二阶段：编译安装GCC 11
-        cd /tmp && \
-        wget https://ftp.gnu.org/gnu/gcc/gcc-11.3.0/gcc-11.3.0.tar.gz && \
-        tar -xzf gcc-11.3.0.tar.gz && \
-        cd gcc-11.3.0 && \
-        ./contrib/download_prerequisites && \
-        mkdir build && cd build && \
-        ../configure \
-          --prefix=/usr/local/gcc-11 \
-          --enable-languages=c,c++ \
-          --disable-multilib \
-          --program-suffix=-11 && \
-        make -j$(nproc) && \
-        make install && \
-        ln -sf /usr/local/gcc-11/bin/g++-11 /usr/bin/g++ && \
-        ln -sf /usr/local/gcc-11/bin/gcc-11 /usr/bin/gcc
+        # cd /tmp && \
+        # wget https://ftp.gnu.org/gnu/gcc/gcc-11.3.0/gcc-11.3.0.tar.gz && \
+        # tar -xzf gcc-11.3.0.tar.gz && \
+        # cd gcc-11.3.0 && \
+        # ./contrib/download_prerequisites && \
+        # mkdir build && cd build && \
+        # ../configure \
+        #   --prefix=/usr/local/gcc-11 \
+        #   --enable-languages=c,c++ \
+        #   --disable-multilib \
+        #   --program-suffix=-11 && \
+        # make -j$(nproc) && \
+        # make install && \
+        # ln -sf /usr/local/gcc-11/bin/g++-11 /usr/bin/g++ && \
+        # ln -sf /usr/local/gcc-11/bin/gcc-11 /usr/bin/gcc
         "
         
     - name: Check compiler version
