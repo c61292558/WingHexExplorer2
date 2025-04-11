@@ -38,7 +38,8 @@ jobs:
         sudo docker run -dit \
           --name qtbuilder \
           -v ${{ github.workspace }}:/workspace \
-          linuxdeepin/apricot
+          linuxdeepin/deepin:23
+
           
     
 
