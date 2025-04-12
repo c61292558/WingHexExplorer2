@@ -55,7 +55,8 @@ jobs:
         apt install -y \
           cmake \
           qtbase5-dev \
-          qtbase5-private-dev \ # <--- 添加这一行
+          qtbase5-private-dev \ 
+          #添加这一行
           qttools5-dev \
           qttools5-dev-tools \
           libqt5svg5-dev \
@@ -80,7 +81,9 @@ jobs:
           flex \
           bison \
           # 可能还需要 zlib 的开发包，以防万一（CMake 曾提示找不到 ZLIB）
-          zlib1g-dev \ # <--- 建议添加，因为 libdwarf 配置时提示找不到 ZLIB
+          zlib1g-dev \ 
+          
+          # 建议添加，因为 libdwarf 配置时提示找不到 ZLIB
           && apt clean
     
         # 第二阶段：编译安装GCC 11
@@ -115,10 +118,10 @@ jobs:
         make  VERBOSE=1"# 编译
 
 
-    - name: List files2
-      if: failure()  # 仅在失败时运行
-      run:  cat ${{github.workspace}}/build/_build/qmsetup_build-Release.log 
-      # cat ${{ github.workspace }}/build/CMakeFiles/CMakeOutput.log && ls -l ${{ github.workspace }} && cd ${{ github.workspace }}/build/CMakeFiles && ls -l 
+    # - name: List files2
+    #   if: failure()  # 仅在失败时运行
+    #   run:  cat ${{github.workspace}}/build/_build/qmsetup_build-Release.log 
+    #   # cat ${{ github.workspace }}/build/CMakeFiles/CMakeOutput.log && ls -l ${{ github.workspace }} && cd ${{ github.workspace }}/build/CMakeFiles && ls -l 
       
     - name: Upload build logs
       if: failure()  # 仅在失败时运行
