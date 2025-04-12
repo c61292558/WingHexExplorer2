@@ -146,7 +146,7 @@ jobs:
       id: version
       run: |
         # 提取最新的tag作为版本号
-        VERSION=$(git describe --tags --abbrev=0)
+        VERSION=$(git describe --tags --abbrev=0 --always)
         echo "version=${VERSION}" >> $GITHUB_OUTPUT
         
     - name: Compress build artifacts
