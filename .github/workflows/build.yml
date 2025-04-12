@@ -108,9 +108,9 @@ jobs:
         sudo docker exec qtbuilder bash -c "cd /workspace && \
         mkdir -p build && \
         cd build && \
-        cmake -DCMAKE_CXX_STANDARD=20 --debug-output .. && \   # 生成 Makefile  
+        cmake  --debug-output .. && \   
         make  VERBOSE=1"# 编译
-
+        # 生成 Makefile  del -DCMAKE_CXX_STANDARD=20
 
     # - name: List files2
     #   if: failure()  # 仅在失败时运行
