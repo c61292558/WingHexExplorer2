@@ -2,8 +2,10 @@ name: Build and Release
 
 on:
   push:
-   branches:
-     - main
+   # branches:
+   #   - main
+    标签:
+      - 'v*' 
       
 jobs:
   build-and-release:
@@ -20,7 +22,11 @@ jobs:
         repository: c61292558/WingHexExplorer2
         token: ${{ secrets.GITHUB_TOKEN }}  # 显式传递自动生成的令牌
         Workspace-tags: true
-        
+
+    - name: Get version from tag
+      id: get_version
+      run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
+      
     - name: Checkout code submodules
       uses: actions/checkout@v4
       with:
@@ -142,12 +148,12 @@ jobs:
         git describe --tags --abbrev=0 || echo "Git describe failed here too!"
 
         
-    - name: Get version info
-      id: version
-      run: |
-        # 提取最新的tag作为版本号
-        VERSION=$(git describe --tags ---abbrev=0 2>/dev/null || echo "v0.0.0")
-        echo "version=${VERSION}" >> $GITHUB_OUTPUT
+    # - name: Get version info
+    #   id: version
+    #   run: |
+    #     # 提取最新的tag作为版本号
+    #     VERSION=$(git describe --tags ---abbrev=0 2>/dev/null || echo "v0.0.0")
+    #     echo "version=${VERSION}" >> $GITHUB_OUTPUT
         
     - name: Compress build artifacts
       run: |
