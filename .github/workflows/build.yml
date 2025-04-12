@@ -53,12 +53,18 @@ jobs:
         apt update -y && \
         apt install -y \
           cmake \
-          qtbase5-dev \
-          qtbase5-private-dev \
-          qttools5-dev \
-          qttools5-dev-tools \
-          libqt5svg5-dev \
-          libqt5x11extras5-dev \
+          build-essential \
+          git \
+          ninja-build \
+          wget \
+          flex \
+          bison \
+          zlib1g-dev \
+          # --- GMP 库 (保留) ---
+          libgmp-dev \
+          libmpfr-dev \
+          libmpc-dev \
+          # --- 图形/X11 库 (保留 - Qt 可能仍需要) ---
           libgl1-mesa-dev \
           libx11-dev \
           libxcb1-dev \
@@ -68,16 +74,19 @@ jobs:
           libxrender-dev \
           libxkbcommon-dev \
           libwayland-dev \
-          build-essential \
-          git \
-          ninja-build \
-          wget \
-          libgmp-dev \
-          libmpfr-dev \
-          libmpc-dev \
-          flex \
-          bison \
-          zlib1g-dev \
+          # --- Qt 6 开发包 ---
+          qt6-base-dev \
+          # Qt 6 基础开发包 (通常包含 Core, Gui, Widgets, Network 等)
+          qt6-base-dev-tools \
+          # Qt 6 的基础工具 (moc, uic, rcc)
+          qt6-tools-dev \
+          # Qt 6 的额外工具 (如 Linguist, Designer)
+          qt6-tools-dev-tools \ 
+          # 更多工具
+          qt6-svg-dev \
+          # Qt 6 的 SVG 支持 (替代 libqt5svg5-dev)
+          # libqt6x11extras6-dev # 如果你的项目确实需要 X11 特殊功能，取消这行注释 (替代 libqt5x11extras5-dev)
+          # 根据你的项目需要，可能需要添加其他 Qt 6 模块, 例如: qt6-multimedia-dev
           && apt clean
     
         # 第二阶段：编译安装GCC 11
