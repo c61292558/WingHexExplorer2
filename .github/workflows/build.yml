@@ -50,11 +50,11 @@ jobs:
     - name: Install dependencies
       run: |
         sudo docker exec qtbuilder bash -c "
-        apt update && \
+        apt update -y && \
         apt install -y \
           cmake \
           qtbase5-dev \
-          qtbase5-private-dev \ 
+          qtbase5-private-dev \
           qttools5-dev \
           qttools5-dev-tools \
           libqt5svg5-dev \
@@ -77,7 +77,7 @@ jobs:
           libmpc-dev \
           flex \
           bison \
-          zlib1g-dev \ 
+          zlib1g-dev \
           && apt clean
     
         # 第二阶段：编译安装GCC 11
