@@ -2,10 +2,11 @@ name: Build and Release
 
 on:
   push:
+    
+      - 'v*' 
    # branches:
    #   - main
-    标签:
-      - 'v*' 
+   
       
 jobs:
   build-and-release:
