@@ -56,7 +56,7 @@ jobs:
           cmake \
           qtbase5-dev \
           qtbase5-private-dev \ 
-          #添加这一行 \
+          #添加这一行 
           qttools5-dev \
           qttools5-dev-tools \
           libqt5svg5-dev \
