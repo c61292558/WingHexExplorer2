@@ -19,6 +19,7 @@ jobs:
         fetch-depth: 0  # 获取完整提交历史用于版本检测
         repository: c61292558/WingHexExplorer2
         token: ${{ secrets.GITHUB_TOKEN }}  # 显式传递自动生成的令牌
+        Workspace-tags: true
         
     - name: Checkout code submodules
       uses: actions/checkout@v4
@@ -117,19 +118,30 @@ jobs:
     #   run:  cat ${{github.workspace}}/build/_build/qmsetup_build-Release.log 
     #   # cat ${{ github.workspace }}/build/CMakeFiles/CMakeOutput.log && ls -l ${{ github.workspace }} && cd ${{ github.workspace }}/build/CMakeFiles && ls -l 
       
-    - name: Upload build logs
-      if: failure()  # 仅在失败时运行
-      uses: actions/upload-artifact@v4
-      with:
-        name: qmsetup-build-log
-        path: |
-          ./qmsetup_build.log
-        if-no-files-found: warn  # 如果文件不存在仅警告
+    # - name: Upload build logs
+    #   if: failure()  # 仅在失败时运行
+    #   uses: actions/upload-artifact@v4
+    #   with:
+    #     name: qmsetup-build-log
+    #     path: |
+    #       ./qmsetup_build.log
+    #     if-no-files-found: warn  # 如果文件不存在仅警告
 
     # - name: Print qmsetup build log on failure
     #   if: failure()
     #   run: cat /build/_build/qmsetup_build-Release.log
+    - name: Debug Git Info # 在 Get version info 步骤之前添加
+      run: |
+        echo "--- Git Status ---"
+        git status
+        echo "--- Recent Commits ---"
+        git log -n 5 --decorate --oneline
+        echo "--- Available Tags ---"
+        git tag -l
+        echo "--- Trying git describe directly ---"
+        git describe --tags --abbrev=0 || echo "Git describe failed here too!"
 
+        
     - name: Get version info
       id: version
       run: |
