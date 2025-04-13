@@ -117,8 +117,8 @@ jobs:
         mkdir -p build && \
         cd build && \
         cmake   .. && \   
-        make  VERBOSE=1"# 编译
-        # 生成 Makefile  del -DCMAKE_CXX_STANDARD=20  cmake --debug-output
+        make "# 编译
+        # 生成 Makefile  del -DCMAKE_CXX_STANDARD=20  cmake --debug-output  , make  VERBOSE=1
 
     # - name: List files2
     #   if: failure()  # 仅在失败时运行
