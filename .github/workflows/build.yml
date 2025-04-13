@@ -181,6 +181,11 @@ jobs:
       run: |
         dpkg-deb --build debian "com.wingsummer.winghexexplorer_${{ steps.version.outputs.version }}_amd64.deb"
     
+    - name: List files deb 
+      run: ls -la && echo "-----------------这是打包完之后---------------------------"
+
+
+    
     - name: Create Release
       id: create_release
       uses: softprops/action-gh-release@v1
@@ -193,6 +198,7 @@ jobs:
         prerelease: false
         files: |
           build_artifacts.zip
+          *.deb
           build/*.app    # 应用程序文件
           build/*.so     # 动态库文件
           build/*.dmg    # macOS安装包
