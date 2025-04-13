@@ -24,9 +24,23 @@ jobs:
         token: ${{ secrets.GITHUB_TOKEN }}  # 显式传递自动生成的令牌
         Workspace-tags: true
 
-    - name: Get version from tag
-      id: get_version
-      run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
+    # - name: Get version from tag
+    #   id: get_version
+    #   run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
+    
+    - name: Generate version info
+      id: version
+      run: |
+        # 尝试获取最近的tag，如果没有则生成基于commit的版本号
+        if git describe --tags --abbrev=0 2>/dev/null; then
+          VERSION=$(git describe --tags --abbrev=0)
+        else
+          VERSION="v0.0.0-$(git rev-parse --short HEAD)"
+        fi
+        echo "version=${VERSION}" >> $GITHUB_OUTPUT
+        echo "Using version: ${VERSION}"
+
+      
       
     - name: Checkout code submodules
       uses: actions/checkout@v4
@@ -173,6 +187,7 @@ jobs:
       with:
         token: ${{ secrets.GITHUB_TOKEN }}   # 添加此行
         tag_name: ${{ steps.version.outputs.version }}
+        overwrite: true  # 关键！允许覆盖已有的 Release
         name: "Release ${{ steps.version.outputs.version }}"
         draft: false
         prerelease: false
