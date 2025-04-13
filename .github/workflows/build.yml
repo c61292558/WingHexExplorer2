@@ -4,8 +4,8 @@ on:
   push:
     tags:
       - 'v*' 
-   # branches:
-   #   - main
+    branches:
+      - '**'
    
       
 jobs:
@@ -116,9 +116,9 @@ jobs:
         sudo docker exec qtbuilder bash -c "cd /workspace && \
         mkdir -p build && \
         cd build && \
-        cmake  --debug-output .. && \   
+        cmake   .. && \   
         make  VERBOSE=1"# 编译
-        # 生成 Makefile  del -DCMAKE_CXX_STANDARD=20
+        # 生成 Makefile  del -DCMAKE_CXX_STANDARD=20  cmake --debug-output
 
     # - name: List files2
     #   if: failure()  # 仅在失败时运行
@@ -160,6 +160,9 @@ jobs:
       run: |
         zip -r build_artifacts.zip build
 
+    - name: List files commp 
+      run: ls -la && echo "-----------------这是编译完之后---------------------------"
+      
     - name: Create Release
       id: create_release
       uses: softprops/action-gh-release@v1
