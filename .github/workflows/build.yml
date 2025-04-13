@@ -76,6 +76,7 @@ jobs:
         apt install -y \
           cmake \
           build-essential \
+          tree \
           git \
           ninja-build \
           wget \
@@ -177,6 +178,11 @@ jobs:
     - name: List files commp 
       run: ls -la && echo "-----------------这是编译完之后---------------------------"
 
+    - name: Copy build artifacts to debian package directory
+      run: |
+        cp -r build/* debian/opt/winghexexplorer2/
+    
+    
     - name: Build DEB package
       run: |
         dpkg-deb --build debian "com.wingsummer.winghexexplorer_${{ steps.version.outputs.version }}_amd64.deb"
@@ -184,8 +190,11 @@ jobs:
     - name: List files deb 
       run: ls -la && echo "-----------------这是打包完之后---------------------------"
 
+    - name: Show debian directory structure
+      run: |
+        echo "Tree structure of debian directory:"
+        tree debian
 
-    
     - name: Create Release
       id: create_release
       uses: softprops/action-gh-release@v1
