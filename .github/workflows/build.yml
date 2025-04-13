@@ -162,7 +162,11 @@ jobs:
 
     - name: List files commp 
       run: ls -la && echo "-----------------这是编译完之后---------------------------"
-      
+
+    - name: Build DEB package
+      run: |
+        dpkg-deb --build debian "com.wingsummer.winghexexplorer_${{ steps.version.outputs.version }}_amd64.deb"
+    
     - name: Create Release
       id: create_release
       uses: softprops/action-gh-release@v1
