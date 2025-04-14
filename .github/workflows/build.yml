@@ -72,6 +72,7 @@ jobs:
         sudo docker exec qtbuilder bash -c "
         apt update -y && \
         apt install -y \
+          xz-utils \
           cmake \
           build-essential \
           tree \
@@ -173,7 +174,7 @@ jobs:
     
     - name: Build DEB package
       run: |
-        dpkg-deb --build debian "com.wingsummer.winghexexplorer_${{ steps.version.outputs.version }}_amd64.deb"
+        dpkg-deb --build --compression=xz  debian "com.wingsummer.winghexexplorer_${{ steps.version.outputs.version }}_amd64.deb"
     
     - name: List files deb 
       run: ls -la && echo "-----------------这是打包完之后---------------------------"
