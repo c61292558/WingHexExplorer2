@@ -37,7 +37,9 @@ jobs:
         fi
         echo "version=${VERSION}" >> $GITHUB_OUTPUT
         echo "Using version: ${VERSION}"
-
+    - name: Build DEB package
+      run: |
+        dpkg-deb --build --compress-type=xz  debian "com.wingsummer.winghexexplorer_${{ steps.version.outputs.version }}_amd64.deb"
       
       
     - name: Checkout code submodules
@@ -172,9 +174,7 @@ jobs:
         cp -r build/* debian/opt/winghexexplorer2/
     
     
-    - name: Build DEB package
-      run: |
-        dpkg-deb --build --compression=xz  debian "com.wingsummer.winghexexplorer_${{ steps.version.outputs.version }}_amd64.deb"
+    
     
     - name: List files deb 
       run: ls -la && echo "-----------------这是打包完之后---------------------------"
