@@ -20,6 +20,7 @@
 #include "asdatabase.h"
 #include "class/aspreprocesser.h"
 #include "class/qascodeparser.h"
+#include "class/scriptmachine.h"
 #include "model/codecompletionmodel.h"
 #include "wingcodeedit.h"
 
@@ -39,10 +40,9 @@ Q_GLOBAL_STATIC_WITH_ARGS(QByteArray, DBL_COLON_TRIGGER, ("::"))
 Q_GLOBAL_STATIC_WITH_ARGS(QByteArray, LEFT_PARE_TRIGGER, ("("))
 Q_GLOBAL_STATIC_WITH_ARGS(QByteArray, SEMI_COLON_TRIGGER, (";"))
 
-AsCompletion::AsCompletion(asIScriptEngine *engine, WingCodeEdit *p)
-    : WingCompleter(p), parser(engine), _engine(engine), m_parseDocument(true) {
-    Q_ASSERT(engine);
-
+AsCompletion::AsCompletion(WingCodeEdit *p)
+    : WingCompleter(p), parser(ScriptMachine::instance().engine()),
+      m_parseDocument(true) {
     setTriggerList({*DOT_TRIGGER, *DBL_COLON_TRIGGER,
                     // unleash the power of call tips
                     *LEFT_PARE_TRIGGER,
@@ -64,8 +64,10 @@ AsCompletion::AsCompletion(asIScriptEngine *engine, WingCodeEdit *p)
 
 AsCompletion::~AsCompletion() {}
 
-void AsCompletion::applyEmptyNsNode(QList<CodeInfoTip> &nodes) {
+void AsCompletion::applyEmptyNsNode(QList<CodeInfoTip> &nodes,
+                                    const QList<CodeInfoTip> &docNodes) {
     static QList<CodeInfoTip> emptyNsNodes;
+
     if (emptyNsNodes.isEmpty()) {
         auto &hn = parser.headerNodes();
         for (auto p = hn.constKeyValueBegin(); p != hn.constKeyValueEnd();
@@ -81,6 +83,24 @@ void AsCompletion::applyEmptyNsNode(QList<CodeInfoTip> &nodes) {
         }
         emptyNsNodes.append(parser.keywordNodes());
     }
+
+    nodes.clear();
+
+    for (auto &p : docNodes) {
+        if (p.nameSpace.isEmpty()) {
+            nodes.append(p);
+        } else {
+            if (p.dontAddGlobal) {
+                continue;
+            }
+
+            CodeInfoTip tip;
+            tip.type = CodeInfoTip::Type::Group;
+            tip.name = p.nameSpace;
+            nodes.append(tip);
+        }
+    }
+
     nodes.append(emptyNsNodes);
 }
 
@@ -119,24 +139,25 @@ QString AsCompletion::wordSeperators() const {
     return eow;
 }
 
-void AsCompletion::processTrigger(const QString &trigger,
+bool AsCompletion::processTrigger(const QString &trigger,
                                   const QString &content) {
     if (content.isEmpty()) {
-        return;
+        return false;
     }
 
     if (trigger == *SEMI_COLON_TRIGGER) {
         clearFunctionTip();
-        return;
+        return false;
     }
 
     auto len = content.length();
     auto code = content.toUtf8();
 
     QList<CodeInfoTip> nodes;
+    QList<CodeInfoTip> docNodes;
 
     if (m_parseDocument) {
-        nodes.append(parseDocument());
+        docNodes = parseDocument();
     }
 
     if (!trigger.isEmpty() && trigger != *DOT_TRIGGER) {
@@ -152,12 +173,14 @@ void AsCompletion::processTrigger(const QString &trigger,
         QByteArray content;
     };
 
+    auto engine = ScriptMachine::instance().engine();
+
     // parse the tokens
     QVector<Token> tokens;
     qsizetype pos = 0;
     for (; p < end;) {
         asUINT tokenLen = 0;
-        auto tt = _engine->ParseToken(p, len, &tokenLen);
+        auto tt = engine->ParseToken(p, len, &tokenLen);
         if (tt == asTC_WHITESPACE) {
             p += tokenLen;
             pos += tokenLen;
@@ -200,11 +223,16 @@ void AsCompletion::processTrigger(const QString &trigger,
     QByteArray fn;
     if (tokens.isEmpty()) {
         popup()->hide();
-        return;
+        return false;
     }
 
     QString prefix;
     auto etoken = tokens.back();
+    if (etoken.type == asTC_VALUE || etoken.type == asTC_COMMENT ||
+        etoken.type == asTC_UNKNOWN) {
+        popup()->hide();
+        return false;
+    }
 
     // if trigger is empty, it's making editing
     if (trigger.isEmpty()) {
@@ -212,7 +240,7 @@ void AsCompletion::processTrigger(const QString &trigger,
         prefix = etoken.content;
         tokens.removeLast();
         if (tokens.isEmpty()) {
-            applyEmptyNsNode(nodes);
+            applyEmptyNsNode(nodes, docNodes);
         } else {
             etoken = tokens.back(); // checking later
         }
@@ -224,20 +252,21 @@ void AsCompletion::processTrigger(const QString &trigger,
             if (etoken.content == *DBL_COLON_TRIGGER) {
                 processTrigger(*DBL_COLON_TRIGGER, content.left(etoken.pos));
                 setCompletionPrefix(prefix);
-                return;
+                return true;
             } else if (etoken.content == *DOT_TRIGGER) {
                 processTrigger(*DOT_TRIGGER, content.left(etoken.pos));
                 setCompletionPrefix(prefix);
-                return;
+                return true;
             } else {
-                applyEmptyNsNode(nodes);
+                applyEmptyNsNode(nodes, docNodes);
             }
         } else if (etoken.type != asTC_IDENTIFIER) {
             popup()->hide();
-            return;
+            return false;
         }
 
         if (trigger == *DOT_TRIGGER) {
+            // member guessing ?
             applyClassNodes(nodes);
         } else if (etoken.content.length() >= triggerAmount()) {
             // completion for a.b.c or a::b.c or a::b::c.d or ::a::b.c
@@ -247,12 +276,19 @@ void AsCompletion::processTrigger(const QString &trigger,
                 if (idx >= 0) {
                     if (tokens.at(idx).content == *DOT_TRIGGER) {
                         popup()->hide();
-                        return;
+                        return false;
                     }
                 }
-                nodes = parser.headerNodes().value(ns);
+                nodes = parser.headerNodes().value(ns) +
+                        parser.enumsNodes().value(ns);
+                for (auto &n : docNodes) {
+                    if (n.nameSpace == ns) {
+                        nodes.append(n);
+                    }
+                }
+
                 if (nodes.isEmpty()) {
-                    return;
+                    return true;
                 }
             } else if (trigger == *LEFT_PARE_TRIGGER) {
                 // the first is function name, an identifier
@@ -268,12 +304,14 @@ void AsCompletion::processTrigger(const QString &trigger,
                 if (idx >= 0 && idx < tokens.length()) {
                     if (tokens.at(idx).content == *DOT_TRIGGER) {
                         popup()->hide();
-                        return;
+                        return false;
                     }
                 }
+
                 nodes = parser.headerNodes().value(ns);
+
                 if (nodes.isEmpty()) {
-                    applyEmptyNsNode(nodes);
+                    applyEmptyNsNode(nodes, docNodes);
                 }
             }
         }
@@ -281,6 +319,7 @@ void AsCompletion::processTrigger(const QString &trigger,
 
     setModel(new CodeCompletionModel(nodes, this));
     setCompletionPrefix(prefix);
+    return true;
 }
 
 QList<CodeInfoTip> AsCompletion::parseDocument() {
@@ -290,9 +329,10 @@ QList<CodeInfoTip> AsCompletion::parseDocument() {
     }
 
     auto code = editor->toPlainText();
+    auto engine = ScriptMachine::instance().engine();
 
     // first preprocess the code
-    AsPreprocesser prepc(_engine);
+    AsPreprocesser prepc(engine);
     // TODO: set include callback
     // prepc.setIncludeCallback();
 
@@ -306,7 +346,7 @@ QList<CodeInfoTip> AsCompletion::parseDocument() {
     QList<CodeInfoTip> ret;
 
     for (auto &d : data) {
-        QAsCodeParser parser(_engine);
+        QAsCodeParser parser(engine);
         auto syms =
             parser.parseAndIntell(editor->textCursor().position(), d.script);
 
@@ -317,21 +357,52 @@ QList<CodeInfoTip> AsCompletion::parseDocument() {
 
             switch (sym.symtype) {
             case QAsCodeParser::SymbolType::Function:
+            case QAsCodeParser::SymbolType::FnDef:
                 tip.type = CodeInfoTip::Type::Function;
                 tip.addinfo.insert(CodeInfoTip::RetType,
                                    QString::fromUtf8(sym.type));
                 tip.addinfo.insert(CodeInfoTip::Args,
                                    QString::fromUtf8(sym.additonalInfo));
+                for (auto &var : sym.children) {
+                    CodeInfoTip va;
+                    va.dontAddGlobal = true;
+                    va.name = var.name;
+                    va.nameSpace = QString::fromUtf8(var.scope.join("::"));
+                    va.type = CodeInfoTip::Type::Variable;
+                    ret.append(va);
+                }
                 break;
             case QAsCodeParser::SymbolType::Enum:
                 tip.type = CodeInfoTip::Type::Enum;
+                for (auto &e : sym.children) {
+                    CodeInfoTip en;
+                    en.dontAddGlobal = true;
+                    en.name = e.name;
+                    en.nameSpace = QString::fromUtf8(e.scope.join("::"));
+                    en.type = CodeInfoTip::Type::Enumerater;
+                    if (!e.additonalInfo.isEmpty()) {
+                        en.addinfo.insert(CodeInfoTip::Comment,
+                                          en.name + QStringLiteral(" = ") +
+                                              e.additonalInfo);
+                    }
+                    ret.append(en);
+                }
+                break;
+            case QAsCodeParser::SymbolType::TypeDef:
+                tip.type = CodeInfoTip::Type::KeyWord;
                 break;
             case QAsCodeParser::SymbolType::Variable:
+                tip.type = CodeInfoTip::Type::Variable;
+                break;
             case QAsCodeParser::SymbolType::Class:
-            case QAsCodeParser::SymbolType::TypeDef:
-            case QAsCodeParser::SymbolType::FnDef:
-            case QAsCodeParser::SymbolType::VarsDecl:
+            case QAsCodeParser::SymbolType::Interface:
+                tip.type = CodeInfoTip::Type::Class;
+                for (auto &mem : sym.children) {
+                    // TODO
+                }
+                break;
             case QAsCodeParser::SymbolType::Invalid:
+            case QAsCodeParser::SymbolType::Import:
                 continue;
             }
 

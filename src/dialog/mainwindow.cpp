@@ -33,7 +33,7 @@
 #include "class/pluginsystem.h"
 #include "class/qkeysequences.h"
 #include "class/richtextitemdelegate.h"
-#include "class/scriptconsolemachine.h"
+#include "class/scriptmachine.h"
 #include "class/settingmanager.h"
 #include "class/wingfiledialog.h"
 #include "class/winginputdialog.h"
@@ -230,6 +230,32 @@ MainWindow::MainWindow(SplashDialog *splash) : FramelessMainWindow() {
     // Don't setup it too early, because the plugin can register script
     // functions. Code completions of them will be not worked out.
     if (set.scriptEnabled()) {
+        auto &sm = ScriptMachine::instance();
+        auto smr = sm.init();
+        if (smr) {
+            ScriptMachine::RegCallBacks callbacks;
+            callbacks.getInputFn = [this]() -> QString {
+                return m_scriptConsole->getInput();
+            };
+            callbacks.clearFn = [this]() { m_scriptConsole->clearConsole(); };
+            callbacks.printMsgFn =
+                [this](const ScriptMachine::MessageInfo &message) {
+                    m_scriptConsole->onOutput(message);
+                };
+            sm.registerCallBack(ScriptMachine::Interactive, callbacks);
+
+            callbacks.getInputFn = [this]() -> QString {
+                return WingInputDialog::getText(this, tr(""), tr(""));
+            };
+            callbacks.clearFn = [this]() { m_bgScriptOutput->clear(); };
+            callbacks.printMsgFn =
+                std::bind(&MainWindow::onOutputBgScriptOutput, this,
+                          std::placeholders::_1);
+            sm.registerCallBack(ScriptMachine::Background, callbacks);
+        } else {
+            // TODO
+        }
+
         // At this time, AngelScript service plugin has started
         if (splash)
             splash->setInfoText(tr("SetupConsole"));
@@ -237,25 +263,17 @@ MainWindow::MainWindow(SplashDialog *splash) : FramelessMainWindow() {
         m_scriptConsole->init();
         if (splash)
             splash->setInfoText(tr("SetupScriptManager"));
-        ScriptManager::instance().attach(m_scriptConsole);
-
-        plg.angelApi()->setBindingConsole(m_scriptConsole);
 
         if (splash)
             splash->setInfoText(tr("SetupScriptService"));
 
         m_scriptConsole->initOutput();
         m_scriptConsole->setMode(QConsoleWidget::Input);
-        m_scriptConsole->machine()->setInsteadFoundDisabled(true);
 
         if (splash)
             splash->setInfoText(tr("SetupScriptEditor"));
         m_scriptDialog = new ScriptingDialog(this);
         m_scriptDialog->initConsole();
-
-        // load the model
-        Q_ASSERT(m_scriptConsole && m_scriptConsole->machine());
-        m_varshowtable->setModel(m_scriptConsole->consoleMachine()->model());
     }
 
     // connect settings signals
@@ -535,8 +553,8 @@ void MainWindow::buildUpDockSystem(QWidget *container) {
         bottomRightArea = buildUpScriptConsoleDock(
             m_dock, ads::RightDockWidgetArea, bottomLeftArea);
         qApp->processEvents();
-        buildUpScriptObjShowDock(m_dock, ads::CenterDockWidgetArea,
-                                 bottomRightArea);
+        buildUpScriptBgOutputDock(m_dock, ads::CenterDockWidgetArea,
+                                  bottomRightArea);
         qApp->processEvents();
         buildUpHashResultDock(m_dock, ads::CenterDockWidgetArea,
                               bottomRightArea);
@@ -547,7 +565,6 @@ void MainWindow::buildUpDockSystem(QWidget *container) {
         qApp->processEvents();
     }
 
-    buildUpVisualDataDock(m_dock, ads::CenterDockWidgetArea, bottomLeftArea);
     qApp->processEvents();
 
     m_bottomViewArea = bottomRightArea;
@@ -1000,277 +1017,15 @@ MainWindow::buildUpScriptConsoleDock(ads::CDockManager *dock,
 }
 
 ads::CDockAreaWidget *
-MainWindow::buildUpScriptObjShowDock(ads::CDockManager *dock,
-                                     ads::DockWidgetArea area,
-                                     ads::CDockAreaWidget *areaw) {
-    m_varshowtable = new QTableViewExt(this);
-    m_varshowtable->setEditTriggers(QTableView::EditTrigger::DoubleClicked);
-    m_varshowtable->setSelectionBehavior(
-        QAbstractItemView::SelectionBehavior::SelectRows);
-    m_varshowtable->horizontalHeader()->setStretchLastSection(true);
+MainWindow::buildUpScriptBgOutputDock(ads::CDockManager *dock,
+                                      ads::DockWidgetArea area,
+                                      ads::CDockAreaWidget *areaw) {
+    m_bgScriptOutput = new QPlainTextEdit(this);
+    m_bgScriptOutput->setReadOnly(true);
 
-    auto dw = buildDockWidget(dock, QStringLiteral("ScriptObjShow"),
-                              tr("ScriptObjShow"), m_varshowtable);
+    auto dw = buildDockWidget(dock, QStringLiteral("BgScriptOutput"),
+                              tr("BgScriptOutput"), m_bgScriptOutput);
     return dock->addDockWidget(area, dw, areaw);
-}
-
-ads::CDockAreaWidget *
-MainWindow::buildUpVisualDataDock(ads::CDockManager *dock,
-                                  ads::DockWidgetArea area,
-                                  ads::CDockAreaWidget *areaw) {
-    using namespace ads;
-
-    auto efilter = new EventFilter(QEvent::DynamicPropertyChange, this);
-    connect(efilter, &EventFilter::eventTriggered, this,
-            [](QObject *obj, QEvent *event) {
-                auto e = static_cast<QDynamicPropertyChangeEvent *>(event);
-                constexpr auto ppname = "__TITLE__";
-                if (e->propertyName() == QByteArray(ppname)) {
-                    auto title = obj->property(ppname).toString();
-                    auto display = obj->property("__DISPLAY__").toString();
-                    auto dock = reinterpret_cast<QDockWidget *>(
-                        obj->property("__DOCK__").value<quintptr>());
-                    if (dock) {
-                        if (!title.isEmpty()) {
-                            display += QStringLiteral("(") + title +
-                                       QStringLiteral(")");
-                        }
-                        dock->setWindowTitle(display);
-                    }
-                }
-            });
-
-    constexpr auto dpname = "__DISPLAY__";
-    constexpr auto dockpname = "__DOCK__";
-
-    m_infolist = new QListView(this);
-    m_infolist->setEditTriggers(QListView::EditTrigger::NoEditTriggers);
-    connect(m_infolist, &QListView::clicked, this,
-            [this](const QModelIndex &index) {
-                if (m_infoclickfn) {
-                    m_infoclickfn(index);
-                }
-            });
-    connect(m_infolist, &QListView::doubleClicked, this,
-            [this](const QModelIndex &index) {
-                if (m_infodblclickfn) {
-                    m_infodblclickfn(index);
-                }
-            });
-    auto dw = buildDockWidget(dock, QStringLiteral("DVList"), tr("DVList"),
-                              m_infolist);
-    m_infolist->setProperty(dpname, tr("DVList"));
-    m_infolist->setProperty(dockpname, quintptr(dw));
-    m_infolist->installEventFilter(efilter);
-    m_infolist->setContextMenuPolicy(Qt::ActionsContextMenu);
-    m_infolist->addAction(
-        newAction(QStringLiteral("copy"), tr("Copy"), [this]() {
-            auto idx = m_infolist->currentIndex();
-            if (idx.isValid()) {
-                qApp->clipboard()->setText(
-                    m_infolist->model()->data(idx).toString());
-                Toast::toast(this, NAMEICONRES(QStringLiteral("copy")),
-                             tr("CopyToClipBoard"));
-            }
-        }));
-    m_infolist->addAction(
-        newAction(QStringLiteral("export"), tr("ExportResult"), [this]() {
-            auto model = m_infotable->model();
-            if (!model) {
-                Toast::toast(this, NAMEICONRES(QStringLiteral("save")),
-                             tr("NothingToSave"));
-                return;
-            }
-
-            auto filename = WingFileDialog::getSaveFileName(
-                this, tr("ChooseSaveFile"), m_lastusedpath,
-                QStringLiteral("TXT (*.txt)"));
-            if (filename.isEmpty()) {
-                return;
-            }
-            QFile f(filename);
-            if (!f.open(QFile::WriteOnly | QFile::Text)) {
-                WingMessageBox::critical(this, tr("Error"),
-                                         tr("FilePermission"));
-                return;
-            }
-
-            auto total = model->rowCount();
-            for (int i = 0; i < total; ++i) {
-                f.write(model->data(model->index(i, 0)).toString().toUtf8());
-                f.write("\n");
-            }
-            f.close();
-            Toast::toast(this, NAMEICONRES(QStringLiteral("save")),
-                         tr("SaveSuccessfully"));
-        }));
-    m_infolist->addAction(
-        newAction(QStringLiteral("del"), tr("ClearResult"), [this]() {
-            auto model = m_infolist->model();
-            model->removeRows(0, model->rowCount());
-            m_infolist->setProperty("__TITLE__", {});
-        }));
-    auto ar = dock->addDockWidget(area, dw, areaw);
-
-    m_infotree = new QTreeView(this);
-    m_infotree->setEditTriggers(QTreeView::EditTrigger::NoEditTriggers);
-    connect(m_infotree, &QTreeView::clicked, this,
-            [this](const QModelIndex &index) {
-                if (m_infotreeclickfn) {
-                    m_infotreeclickfn(index);
-                }
-            });
-    connect(m_infotree, &QTreeView::doubleClicked, this,
-            [this](const QModelIndex &index) {
-                if (m_infotreedblclickfn) {
-                    m_infotreedblclickfn(index);
-                }
-            });
-    dw = buildDockWidget(dock, QStringLiteral("DVTree"), tr("DVTree"),
-                         m_infotree);
-    m_infotree->setProperty(dpname, tr("DVTree"));
-    m_infotree->setProperty(dockpname, quintptr(dw));
-    m_infotree->installEventFilter(efilter);
-    m_infotree->setContextMenuPolicy(Qt::ActionsContextMenu);
-    m_infotree->addAction(
-        newAction(QStringLiteral("copy"), tr("Copy"), [this]() {
-            auto idx = m_infotree->currentIndex();
-            if (idx.isValid()) {
-                qApp->clipboard()->setText(
-                    m_infotree->model()->data(idx).toString());
-                Toast::toast(this, NAMEICONRES(QStringLiteral("copy")),
-                             tr("CopyToClipBoard"));
-            }
-        }));
-    m_infotree->addAction(
-        newAction(QStringLiteral("export"), tr("ExportResult"), [this]() {
-            auto model = m_infotable->model();
-            if (!model) {
-                Toast::toast(this, NAMEICONRES(QStringLiteral("save")),
-                             tr("NothingToSave"));
-                return;
-            }
-
-            auto filename = WingFileDialog::getSaveFileName(
-                this, tr("ChooseSaveFile"), m_lastusedpath,
-                QStringLiteral("Json (*.json)"));
-            if (filename.isEmpty()) {
-                return;
-            }
-
-            QJsonArray rootArray;
-            for (int row = 0; row < model->rowCount(); ++row) {
-                QModelIndex index = model->index(row, 0);
-                rootArray.append(extractModelData(model, index));
-            }
-
-            QJsonDocument jsonDocument(rootArray);
-            QFile file(filename);
-            if (!file.open(QFile::WriteOnly | QFile::Text)) {
-                WingMessageBox::critical(this, tr("Error"),
-                                         tr("FilePermission"));
-                return;
-            }
-
-            file.write(jsonDocument.toJson(QJsonDocument::Indented));
-            file.close();
-            Toast::toast(this, NAMEICONRES(QStringLiteral("save")),
-                         tr("SaveSuccessfully"));
-        }));
-    m_infotree->addAction(
-        newAction(QStringLiteral("del"), tr("ClearResult"), [this]() {
-            auto model = m_infotree->model();
-            model->removeRows(0, model->rowCount());
-            m_infotree->setProperty("__TITLE__", {});
-        }));
-    dock->addDockWidget(CenterDockWidgetArea, dw, ar);
-
-    m_infotable = new QTableView(this);
-    m_infotable->setEditTriggers(QTableView::EditTrigger::NoEditTriggers);
-    connect(m_infotable, &QTableView::clicked, this,
-            [this](const QModelIndex &index) {
-                if (m_infotableclickfn) {
-                    m_infotableclickfn(index);
-                }
-            });
-    connect(m_infotable, &QTableView::doubleClicked, this,
-            [this](const QModelIndex &index) {
-                if (m_infotabledblclickfn) {
-                    m_infotabledblclickfn(index);
-                }
-            });
-    dw = buildDockWidget(dock, QStringLiteral("DVTable"), tr("DVTable"),
-                         m_infotable);
-    m_infotable->setProperty(dpname, tr("DVTable"));
-    m_infotable->setProperty(dockpname, quintptr(dw));
-    m_infotable->installEventFilter(efilter);
-    m_infotable->setContextMenuPolicy(Qt::ActionsContextMenu);
-    m_infotable->addAction(
-        newAction(QStringLiteral("copy"), tr("Copy"), [this]() {
-            auto idx = m_infotable->currentIndex();
-            if (idx.isValid()) {
-                qApp->clipboard()->setText(
-                    m_infotable->model()->data(idx).toString());
-                Toast::toast(this, NAMEICONRES(QStringLiteral("copy")),
-                             tr("CopyToClipBoard"));
-            }
-        }));
-    m_infotable->addAction(
-        newAction(QStringLiteral("export"), tr("ExportResult"), [this]() {
-            auto model = m_infotable->model();
-            saveTableContent(model);
-        }));
-    m_infotable->addAction(
-        newAction(QStringLiteral("del"), tr("ClearResult"), [this]() {
-            auto model = m_infotable->model();
-            model->removeRows(0, model->rowCount());
-            m_infotable->setProperty("__TITLE__", {});
-        }));
-    dock->addDockWidget(CenterDockWidgetArea, dw, ar);
-
-    m_infotxt = new QTextBrowser(this);
-    dw = buildDockWidget(dock, QStringLiteral("DVText"), tr("DVText"),
-                         m_infotxt);
-    m_infotxt->setProperty(dpname, tr("DVText"));
-    m_infotxt->setProperty(dockpname, quintptr(dw));
-    m_infotxt->installEventFilter(efilter);
-    m_infotxt->setContextMenuPolicy(Qt::CustomContextMenu);
-    auto menu = m_infotxt->createStandardContextMenu();
-    menu->addSeparator();
-    menu->addAction(
-        newAction(QStringLiteral("export"), tr("ExportResult"), [this]() {
-            auto filename = WingFileDialog::getSaveFileName(
-                this, tr("ChooseSaveFile"), m_lastusedpath,
-                QStringLiteral("TXT (*.txt)"));
-            if (filename.isEmpty()) {
-                return;
-            }
-
-            QFile file(filename);
-            if (!file.open(QFile::WriteOnly | QFile::Text)) {
-                WingMessageBox::critical(this, tr("Error"),
-                                         tr("FilePermission"));
-                return;
-            }
-
-            file.write(m_infotxt->toPlainText().toUtf8());
-
-            Toast::toast(this, NAMEICONRES(QStringLiteral("save")),
-                         tr("SaveSuccessfully"));
-        }));
-    menu->addAction(
-        newAction(QStringLiteral("del"), tr("ClearResult"), [this]() {
-            m_infotxt->clear();
-            m_infotxt->setProperty("__TITLE__", {});
-        }));
-    connect(m_infotxt, &QTextBrowser::customContextMenuRequested, this,
-            [=](const QPoint &pos) {
-                menu->popup(m_infotxt->viewport()->mapToGlobal(pos));
-            });
-
-    dock->addDockWidget(CenterDockWidgetArea, dw, ar);
-
-    return ar;
 }
 
 RibbonTabContent *MainWindow::buildFilePage(RibbonTabContent *tab) {
@@ -1720,7 +1475,7 @@ RibbonTabContent *MainWindow::buildPluginPage(RibbonTabContent *tab) {
         auto pannel = tab->addGroup(tr("General"));
         addPannelAction(
             pannel, QStringLiteral("settingplugin"), tr("Plugin"),
-            &MainWindow::on_setting_plugin,
+            &MainWindow::on_settingPlugin,
             shortcuts.keySequence(QKeySequences::Key::SETTING_PLUGIN));
     }
 
@@ -1743,13 +1498,12 @@ RibbonTabContent *MainWindow::buildSettingPage(RibbonTabContent *tab) {
         auto pannel = tab->addGroup(tr("General"));
         addPannelAction(
             pannel, QStringLiteral("general"), tr("General"),
-            &MainWindow::on_setting_general,
+            &MainWindow::on_settingGeneral,
             shortcuts.keySequence(QKeySequences::Key::SETTING_GENERAL));
 
         if (set.scriptEnabled()) {
             addPannelAction(pannel, QStringLiteral("scriptset"),
-                            tr("ScriptSetting"),
-                            &MainWindow::on_setting_script);
+                            tr("ScriptSetting"), &MainWindow::on_settingScript);
         }
     }
 
@@ -3097,13 +2851,13 @@ void MainWindow::on_scriptwindow() {
     m_scriptDialog->raise();
 }
 
-void MainWindow::on_setting_general() { m_setdialog->showConfig(0); }
+void MainWindow::on_settingGeneral() { m_setdialog->showConfig(0); }
 
-void MainWindow::on_setting_script() {
+void MainWindow::on_settingScript() {
     m_scriptDialog->settingDialog()->showConfig();
 }
 
-void MainWindow::on_setting_plugin() { m_setdialog->showConfig(2); }
+void MainWindow::on_settingPlugin() { m_setdialog->showConfig(2); }
 
 void MainWindow::on_about() { AboutSoftwareDialog().exec(); }
 
@@ -3939,30 +3693,86 @@ ads::CDockAreaWidget *MainWindow::editorViewArea() const {
     return m_dock->centralWidget()->dockAreaWidget();
 }
 
-QJsonObject MainWindow::extractModelData(const QAbstractItemModel *model,
-                                         const QModelIndex &parent) {
-    QJsonObject jsonObject;
+void MainWindow::onOutputBgScriptOutput(
+    const ScriptMachine::MessageInfo &message) {
+    static QPair<ScriptMachine::MessageType, QPair<int, int>> lastInfo{
+        ScriptMachine::MessageType::Print, {-1, -1}};
 
-    // Add data for the current row
-    for (int col = 0; col < model->columnCount(parent); ++col) {
-        QVariant data =
-            model->data(model->index(parent.row(), col, parent.parent()));
-        QString header = model->headerData(col, Qt::Horizontal).toString();
-        jsonObject[header.isEmpty() ? tr("Column %1").arg(col) : header] =
-            data.toString();
+    auto doc = m_bgScriptOutput->document();
+    auto lastLine = doc->lastBlock();
+    auto isNotBlockStart = !lastLine.text().isEmpty();
+
+    auto cursor = m_bgScriptOutput->textCursor();
+    cursor.movePosition(QTextCursor::End);
+
+    auto fmtMsg = [](const ScriptMachine::MessageInfo &message) -> QString {
+        if (message.row <= 0 || message.col <= 0) {
+            return message.message;
+        } else {
+            return QStringLiteral("(") + QString::number(message.row) +
+                   QStringLiteral(", ") + QString::number(message.col) +
+                   QStringLiteral(")") + message.message;
+        }
+    };
+
+    auto isMatchLast = [](const ScriptMachine::MessageInfo &message) -> bool {
+        if (message.row < 0 || message.col < 0) {
+            return false;
+        }
+        return lastInfo.first == message.type &&
+               lastInfo.second.first == message.row &&
+               lastInfo.second.second == message.col;
+    };
+
+    switch (message.type) {
+    case ScriptMachine::MessageType::Info:
+        if (isMatchLast(message)) {
+            cursor.insertText(message.message);
+        } else {
+            if (isNotBlockStart) {
+                cursor.insertBlock();
+            }
+            cursor.insertText(tr("[Info]") + fmtMsg(message));
+        }
+        break;
+    case ScriptMachine::MessageType::Warn:
+        if (isMatchLast(message)) {
+            auto fmt = cursor.charFormat();
+            fmt.setForeground(QColorConstants::Svg::gold);
+            cursor.insertText(message.message, fmt);
+        } else {
+            if (isNotBlockStart) {
+                m_bgScriptOutput->appendPlainText({});
+            }
+            auto fmt = cursor.charFormat();
+            fmt.setForeground(QColorConstants::Svg::gold);
+            cursor.insertText(tr("[Warn]") + fmtMsg(message), fmt);
+        }
+        break;
+    case ScriptMachine::MessageType::Error:
+        if (isMatchLast(message)) {
+            auto fmt = cursor.charFormat();
+            fmt.setForeground(Qt::red);
+            cursor.insertText(message.message, fmt);
+        } else {
+            if (isNotBlockStart) {
+                cursor.insertBlock();
+            }
+            auto fmt = cursor.charFormat();
+            fmt.setForeground(Qt::red);
+            cursor.insertText(tr("[Error]") + fmtMsg(message), fmt);
+        }
+        break;
+    case ScriptMachine::MessageType::Print:
+        if (lastInfo.first != message.type) {
+            cursor.insertBlock();
+        }
+        cursor.insertText(message.message);
+        break;
     }
 
-    // Recursively add child rows
-    QJsonArray children;
-    for (int row = 0; row < model->rowCount(parent); ++row) {
-        QModelIndex childIndex = model->index(row, 0, parent);
-        children.append(extractModelData(model, childIndex));
-    }
-
-    if (!children.isEmpty())
-        jsonObject["children"] = children;
-
-    return jsonObject;
+    lastInfo.first = message.type;
+    lastInfo.second = qMakePair(message.row, message.col);
 }
 
 void MainWindow::closeEvent(QCloseEvent *event) {
@@ -3976,15 +3786,14 @@ void MainWindow::closeEvent(QCloseEvent *event) {
     }
 
     // then checking the scripting dialog
-    if (!m_scriptDialog->about2Close()) {
-        event->ignore();
-        return;
-    }
+    if (m_scriptDialog) {
+        if (!m_scriptDialog->about2Close()) {
+            event->ignore();
+            return;
+        }
 
-    // then checking the scripting console
-    auto sm = m_scriptConsole->consoleMachine();
-    if (sm->isRunning()) {
-        sm->abortScript();
+        // then abort all script running
+        ScriptMachine::instance().abortScript();
     }
 
     // then checking itself
@@ -4036,9 +3845,11 @@ void MainWindow::closeEvent(QCloseEvent *event) {
     auto &set = SettingManager::instance();
     set.setDockLayout(m_dock->saveState());
 
-    m_scriptDialog->saveDockLayout();
-    set.setRecentFiles(m_recentmanager->saveRecent());
-    set.save();
+    if (m_scriptDialog) {
+        m_scriptDialog->saveDockLayout();
+        set.setRecentFiles(m_recentmanager->saveRecent());
+        set.save();
+    }
 
     PluginSystem::instance().destory();
 

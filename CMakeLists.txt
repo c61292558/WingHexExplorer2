@@ -42,7 +42,7 @@ option(WINGHEX_USE_FRAMELESS "Use borderless windows to ensure UI uniformity"
 if(WIN32)
     find_package(QT NAMES Qt6 Qt5 REQUIRED AxContainer)
     find_package(Qt${QT_VERSION_MAJOR} REQUIRED AxContainer)
-    add_definitions(-DNOMINMAX -D_CRT_SECURE_NO_WARNINGS)
+    add_definitions(-DNOMINMAX)
 endif()
 
 if(${QT_VERSION_MAJOR} EQUAL 5)
@@ -79,7 +79,6 @@ add_subdirectory(3rdparty/QHexView)
 add_subdirectory(3rdparty/WingCodeEdit)
 add_subdirectory(3rdparty/Qt-Advanced-Docking-System)
 add_subdirectory(3rdparty/AngelScript/sdk/angelscript/projects/cmake)
-add_subdirectory(3rdparty/QJsonModel)
 
 set(ANGEL_SCRIPT_ADDON_ROOT
     "${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/AngelScript/sdk/add_on")
@@ -239,8 +238,6 @@ set(CLASS_SRC
     src/class/settingmanager.cpp
     src/class/asdebugger.h
     src/class/asdebugger.cpp
-    src/class/scriptconsolemachine.h
-    src/class/scriptconsolemachine.cpp
     src/class/angelobjstring.h
     src/class/angelobjstring.cpp
     src/class/scripteditortheme.h
@@ -274,7 +271,6 @@ set(CLASS_SRC
     src/class/dockcomponentsfactory.cpp
     src/class/diffutil.h
     src/class/diffutil.cpp
-    src/class/clickcallback.h
     src/class/crashhandler.h
     src/class/crashhandler.cpp
     src/class/pluginsystem.h
@@ -317,10 +313,6 @@ set(MODEL_SRC
     src/model/metadatamodel.cpp
     src/model/checksummodel.h
     src/model/checksummodel.cpp
-    src/model/qjsontablemodel.h
-    src/model/qjsontablemodel.cpp
-    src/model/scriptobjmodel.h
-    src/model/scriptobjmodel.cpp
     src/model/dbgcallstackmodel.h
     src/model/dbgcallstackmodel.cpp
     src/model/dbgvarshowmodel.h
@@ -384,7 +376,6 @@ endforeach()
 set(TRANSLATION_PATH
     ${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/QConsoleWidget
     ${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/QHexView
-    ${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/QJsonModel
     ${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/Qt-Advanced-Docking-System/src
     ${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/QWingRibbon
     ${CMAKE_CURRENT_SOURCE_DIR}/src)
@@ -518,7 +509,6 @@ target_link_libraries(
             WingPlugin
             QHexView
             WingCodeEdit
-            QJsonModel
             angelscript
             qtadvanceddocking-qt${QT_VERSION_MAJOR})
 

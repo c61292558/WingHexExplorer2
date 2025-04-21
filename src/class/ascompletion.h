@@ -24,7 +24,7 @@
 class AsCompletion : public WingCompleter {
     Q_OBJECT
 public:
-    explicit AsCompletion(asIScriptEngine *engine, WingCodeEdit *p);
+    explicit AsCompletion(WingCodeEdit *p);
 
     virtual ~AsCompletion();
 
@@ -38,7 +38,7 @@ public:
     void clearFunctionTip();
 
 protected:
-    virtual void processTrigger(const QString &trigger,
+    virtual bool processTrigger(const QString &trigger,
                                 const QString &content) override;
 
     virtual QList<CodeInfoTip> parseDocument();
@@ -51,12 +51,12 @@ public:
     virtual bool eventFilter(QObject *watched, QEvent *event) override;
 
 private:
-    void applyEmptyNsNode(QList<CodeInfoTip> &nodes);
+    void applyEmptyNsNode(QList<CodeInfoTip> &nodes,
+                          const QList<CodeInfoTip> &docNodes);
     void applyClassNodes(QList<CodeInfoTip> &nodes);
 
 private:
     ASDataBase parser;
-    asIScriptEngine *_engine;
     bool m_parseDocument;
 };
 
