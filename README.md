@@ -27,6 +27,7 @@
 <p align="center">
 <img alt="作者" src="authorband.svg" />
 <img alt="协议" src="licenseband.svg" />
+<a href="https://deepwiki.com/Wing-summer/WingHexExplorer2"><img src="https://deepwiki.com/badge.svg" alt="Ask DeepWiki"></a>
 </p>
 
 <p align="center">
@@ -115,8 +116,7 @@
 
 1. 本软件源代码不得私自应用于闭源商业用途，除非你完整开源（GPL协议的要求）。如果要将软件仓库的代码商用闭源，必须找我购买商业授权签订合同，价格私聊，非诚勿扰。
 2. 本软件是用我的业余时间编写，不能及时修复 Bug 或者提供技术支持，请见谅。
-3. 本人非计算机专业，编写程序难免有 Bug ，欢迎提交 PR 。
-4. 无论在什么时候有疑问，请详细阅读 Wiki 。
+3. 无论在什么时候有疑问，请详细阅读 Wiki 。
 
 ### 打包者必读
 
@@ -128,7 +128,7 @@
 4. 包内最好含有主程序的校验和，但不强求。
 5. 无论是哪种打包形式，都一定要声明其开源协议和自由属性，不得隐藏而借机收费。虽然收费我并不反感，下载服务器还是需要资金维护的，但借着信息差骗人收费，这是我极其深恶痛绝的。
 6. 无论以任何为目的，如未获得我作者的授权，不得修改任意程序内指向的网络链接和软件关于信息，比如赞助和关于软件部分的内容等。
-7. 不得在安装程序内插入任何含有商业推广的插件，并且严格遵守第二条内容。
+7. 不得在安装程序内插入任何含有商业推广的插件。
 
 ### issue 前必读
 
@@ -174,7 +174,7 @@
 
 ## WIKI
 
-&emsp;&emsp;如果想学习羽云十六进制编辑器的使用以及如何开发该软件的插件，请到 [该链接](https://github.com/Wing-summer/WingHexExplorer2/wiki/%E7%AE%80%E4%BB%8B) ，同时也欢迎大家指出 Wiki 的错误以及贡献优质内容。
+&emsp;&emsp;如果想学习羽云十六进制编辑器的使用以及如何开发该软件的插件，请到 [该链接](https://wing-summer.github.io/WingHexExplorer2/docs/zh/credits.html) ，同时也欢迎大家指出 Wiki 的错误以及贡献优质内容。
 
 ## 插件库
 

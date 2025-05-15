@@ -17,17 +17,20 @@
 
 #include "scriptingconsole.h"
 #include "QConsoleWidget/QConsoleIODevice.h"
-#include "class/logger.h"
 #include "class/scriptmachine.h"
 #include "class/scriptsettings.h"
 #include "class/skinmanager.h"
+#include "class/wingmessagebox.h"
 #include "model/codecompletionmodel.h"
+#include "utilities.h"
 
 #include <QApplication>
+#include <QClipboard>
 #include <QColor>
 #include <QIcon>
 #include <QKeyEvent>
 #include <QMenu>
+#include <QMimeData>
 #include <QRegularExpression>
 #include <QTextBlock>
 
@@ -84,18 +87,14 @@ void ScriptingConsole::handleReturnKey() {
         if (iodevice_->isOpen())
             iodevice_->consoleWidgetInput(code);
 
-        emit consoleCommand(code);
+        if (!_isWaitingRead) {
+            emit consoleCommand(code);
+        }
     }
 }
 
 void ScriptingConsole::init() {
     _getInputFn = std::bind(&ScriptingConsole::getInput, this);
-
-    // _sp = new ScriptConsoleMachine(_getInputFn, this);
-    // connect(_sp, &ScriptConsoleMachine::onClearConsole, this,
-    //         &ScriptingConsole::clear);
-    // connect(this, &ScriptingConsole::abortEvaluation, _sp,
-    //         &ScriptConsoleMachine::abortScript);
 
     connect(this, &QConsoleWidget::consoleCommand, this,
             &ScriptingConsole::runConsoleCommand);
@@ -107,9 +106,35 @@ void ScriptingConsole::init() {
 
 void ScriptingConsole::clearConsole() {
     setMode(Output);
+
+    auto cur = this->textCursor();
+    auto off = cur.position() - this->currentHeaderPos();
+    auto lastCmd = this->currentCommandLine();
+    auto dis = lastCmd.length() - off;
+
     clear();
-    appendCommandPrompt(lastCommandPrompt());
+
+    if (lastCommandPrompt()) {
+        auto lines = _codes.split('\n');
+        auto pl = lines.begin();
+        appendCommandPrompt(false);
+        writeStdOut(*pl);
+        pl++;
+        for (; pl != lines.end(); pl++) {
+            appendCommandPrompt(true);
+            writeStdOut(*pl);
+        }
+        appendCommandPrompt(true);
+    } else {
+        appendCommandPrompt(false);
+    }
+
     setMode(Input);
+    replaceCommandLine(lastCmd);
+    cur = this->textCursor();
+    cur.movePosition(QTextCursor::EndOfBlock);
+    cur.movePosition(QTextCursor::Left, QTextCursor::MoveAnchor, dis);
+    setTextCursor(cur);
 }
 
 void ScriptingConsole::processKeyEvent(QKeyEvent *e) { keyPressEvent(e); }
@@ -177,7 +202,7 @@ void ScriptingConsole::onOutput(const ScriptMachine::MessageInfo &message) {
         flush();
         break;
     case ScriptMachine::MessageType::Print:
-        if (lastInfo.first != message.type) {
+        if (lastInfo.first != message.type && isNotBlockStart) {
             newLine();
         }
         stdOut(message.message);
@@ -188,12 +213,19 @@ void ScriptingConsole::onOutput(const ScriptMachine::MessageInfo &message) {
     lastInfo.second = qMakePair(message.row, message.col);
 }
 
+void ScriptingConsole::abortCurrentCode() {
+    setMode(Output);
+    _codes.clear();
+    appendCommandPrompt();
+    setMode(Input);
+}
+
 void ScriptingConsole::applyScriptSettings() {
     auto &set = ScriptSettings::instance();
     auto dfont = QFont(set.consoleFontFamily());
     dfont.setPointSize(set.consoleFontSize());
 
-    auto thname = set.editorTheme();
+    auto thname = set.consoleTheme();
     if (thname.isEmpty()) {
         switch (SkinManager::instance().currentTheme()) {
         case SkinManager::Theme::Dark:
@@ -219,8 +251,94 @@ void ScriptingConsole::applyScriptSettings() {
 
 void ScriptingConsole::runConsoleCommand(const QString &code) {
     auto exec = code.trimmed();
-    if (exec.endsWith('\\')) {
+    if (exec == QStringLiteral("#ls")) {
+        auto &ins = ScriptMachine::instance();
+        auto mod = ins.module(ScriptMachine::Interactive);
+        if (mod) {
+            auto total = mod->GetGlobalVarCount();
+
+            setMode(Output);
+
+            if (total == 0) {
+                stdOut("<none>");
+            } else {
+                auto &sm = ScriptMachine::instance();
+                for (asUINT i = 0; i < total; ++i) {
+                    const char *name;
+                    int typeID;
+                    auto decl = mod->GetGlobalVarDeclaration(i);
+                    if (decl && mod->GetGlobalVar(i, &name, nullptr, &typeID) ==
+                                    asSUCCESS) {
+                        auto value = sm.debugger()->toString(
+                            mod->GetAddressOfGlobalVar(i), typeID, sm.engine(),
+                            1);
+                        stdOut(decl + QStringLiteral(" = ") + value);
+                    }
+                }
+            }
+
+            _codes.clear();
+            appendCommandPrompt();
+            setMode(Input);
+        }
+    } else if (exec.startsWith(QStringLiteral("#del"))) {
+        // this is special command
+        auto &ins = ScriptMachine::instance();
+        auto mod = ins.module(ScriptMachine::Interactive);
+        if (mod) {
+            // first check whether contains \n
+            auto idx = exec.indexOf('\n');
+            if (idx >= 0) {
+                setMode(Output);
+                stdErr(tr("InvalidDelCmd"));
+            } else {
+                // ok, then tokens should be devided by the space
+                exec.remove(0, 4);
+                auto vars = exec.split(' ', Qt::SkipEmptyParts);
+
+                QList<asUINT> indices;
+
+                // then check
+                setMode(Output);
+                for (auto &v : vars) {
+                    auto idx = mod->GetGlobalVarIndexByName(v.toUtf8());
+                    if (idx >= 0) {
+                        indices.append(idx);
+                    } else {
+                        stdWarn(tr("NotFoundIgnore:") + v);
+                    }
+                }
+
+                std::sort(indices.begin(), indices.end(), std::greater<int>());
+
+                // ok, remove
+                for (auto &i : indices) {
+                    mod->RemoveGlobalVar(i);
+                }
+            }
+        }
+        _codes.clear();
+        appendCommandPrompt();
+        setMode(Input);
+    } else if (exec == QStringLiteral("#cls")) {
+        auto &ins = ScriptMachine::instance();
+        auto mod = ins.module(ScriptMachine::Interactive);
+        if (mod) {
+            auto total = mod->GetGlobalVarCount();
+            if (total) {
+                asUINT i = total;
+                do {
+                    --i;
+                    mod->RemoveGlobalVar(i);
+                } while (i);
+            }
+        }
+        _codes.clear();
+        appendCommandPrompt();
+        setMode(Input);
+    } else if (exec.endsWith('\\')) {
         static QRegularExpression ex(QStringLiteral("[\\\\\\s]+$"));
+        _codes.append('\n');
         _codes += exec.remove(ex);
         setMode(Output);
         appendCommandPrompt(true);
@@ -228,10 +346,8 @@ void ScriptingConsole::runConsoleCommand(const QString &code) {
     } else {
         setMode(Output);
         _codes += exec;
-        if (!ScriptMachine::instance().executeCode(ScriptMachine::Interactive,
-                                                   _codes)) {
-            // WingMessageBox::
-        }
+        ScriptMachine::instance().executeCode(ScriptMachine::Interactive,
+                                              _codes);
         _codes.clear();
         appendCommandPrompt();
         setMode(Input);
@@ -239,11 +355,18 @@ void ScriptingConsole::runConsoleCommand(const QString &code) {
 }
 
 QString ScriptingConsole::getInput() {
+    auto &s = consoleStream();
     appendCommandPrompt(true);
     setMode(Input);
-    consoleStream().device()->waitForReadyRead(-1);
+    s.status();
+    auto d = s.device();
+    auto ba = d->bytesAvailable();
+    d->skip(ba);
+    _isWaitingRead = true;
+    d->waitForReadyRead(-1);
     QString instr;
-    consoleStream() >> instr;
+    s >> instr;
+    _isWaitingRead = false;
     setMode(Output);
     return instr;
 }
@@ -266,31 +389,115 @@ void ScriptingConsole::onCompletion(const QModelIndex &index) {
     if (selfdata.type == CodeInfoTip::Type::Function ||
         selfdata.type == CodeInfoTip::Type::ClsFunction) {
         auto args = selfdata.addinfo.value(CodeInfoTip::Args);
-        auto cursor = textCursor();
-        cursor.insertText(QStringLiteral("()"));
-        if (!args.isEmpty()) {
-            cursor.movePosition(QTextCursor::Left);
-            setTextCursor(cursor);
+
+        auto cur = textCursor();
+        cur.movePosition(QTextCursor::NextCharacter, QTextCursor::KeepAnchor);
+        auto ch = cur.selectedText();
+        if (ch.isEmpty() || ch.front().isSpace()) {
+            auto cursor = textCursor();
+            cursor.insertText(QStringLiteral("()"));
+            if (!args.isEmpty()) {
+                cursor.movePosition(QTextCursor::Left);
+                setTextCursor(cursor);
+            }
+        } else {
+            auto cursor = textCursor();
+            cursor.insertText(QStringLiteral("("));
         }
     }
 }
 
+void ScriptingConsole::paste() {
+    if (ScriptMachine::instance().isRunning(ScriptMachine::Interactive)) {
+        return;
+    }
+
+    const QMimeData *const clipboard = QApplication::clipboard()->mimeData();
+    const QString text = clipboard->text();
+    if (!text.isEmpty()) {
+        if (text.indexOf('\n') < 0) {
+            if (isCursorInEditZone()) {
+                auto cursor = this->textCursor();
+                cursor.insertText(text);
+            } else {
+                replaceCommandLine(text);
+            }
+        } else {
+            auto ret = WingMessageBox::question(
+                nullptr, tr("MultiCodeCanNotUndo"), text);
+            if (ret == QMessageBox::No) {
+                return;
+            }
+            auto lines = text.split('\n');
+            if (lines.isEmpty()) {
+                return;
+            }
+
+            setMode(Output);
+            auto pl = lines.begin();
+            auto pend = std::prev(lines.end());
+            writeStdOut(*pl);
+            pl++;
+            for (; pl != pend; pl++) {
+                appendCommandPrompt(true);
+                writeStdOut(*pl);
+            }
+            appendCommandPrompt(true);
+            setMode(Input);
+            replaceCommandLine(*pl);
+            lines.removeLast();
+            _codes = lines.join('\n');
+        }
+    }
+}
+
+bool ScriptingConsole::isTerminal() const { return _isTerminal; }
+
+void ScriptingConsole::setIsTerminal(bool newIsTerminal) {
+    _isTerminal = newIsTerminal;
+}
+
 QString ScriptingConsole::currentCodes() const {
-    return _codes + currentCommandLine();
+    QTextCursor textCursor = this->textCursor();
+    textCursor.setPosition(inpos_, QTextCursor::KeepAnchor);
+    return _codes + textCursor.selectedText();
 }
 
 void ScriptingConsole::contextMenuEvent(QContextMenuEvent *event) {
     QMenu menu(this);
 
-    menu.addAction(QIcon(QStringLiteral(":/qeditor/copy.png")), tr("Copy"),
-                   QKeySequence(QKeySequence::Copy), this,
-                   &ScriptingConsole::copy);
-    menu.addAction(QIcon(QStringLiteral(":/qeditor/cut.png")), tr("Cut"),
-                   QKeySequence(QKeySequence::Cut), this,
-                   &ScriptingConsole::cut);
-    menu.addAction(QIcon(QStringLiteral(":/qeditor/paste.png")), tr("Paste"),
-                   QKeySequence(QKeySequence::Paste), this,
-                   &ScriptingConsole::paste);
+    auto a = menu.addAction(QIcon(QStringLiteral(":/qeditor/copy.png")),
+                            tr("Copy"), QKeySequence(QKeySequence::Copy), this,
+                            &ScriptingConsole::copy);
+    a->setShortcutContext(Qt::WidgetShortcut);
+    a = menu.addAction(QIcon(QStringLiteral(":/qeditor/cut.png")), tr("Cut"),
+                       QKeySequence(QKeySequence::Cut), this,
+                       &ScriptingConsole::cut);
+    a->setShortcutContext(Qt::WidgetShortcut);
+    a = menu.addAction(QIcon(QStringLiteral(":/qeditor/paste.png")),
+                       tr("Paste"), QKeySequence(QKeySequence::Paste), this,
+                       &ScriptingConsole::paste);
+    a->setShortcutContext(Qt::WidgetShortcut);
+
+    if (_isTerminal) {
+        a = menu.addAction(ICONRES(QStringLiteral("del")), tr("Clear"),
+                           QKeySequence(Qt::ControlModifier | Qt::Key_L), this,
+                           &ScriptingConsole::clearConsole);
+        a->setShortcutContext(Qt::WidgetShortcut);
+        menu.addSeparator();
+        a = menu.addAction(ICONRES(QStringLiteral("dbgstop")),
+                           tr("AbortScript"),
+                           QKeySequence(Qt::ControlModifier | Qt::Key_Q), []() {
+                               ScriptMachine::instance().abortScript(
+                                   ScriptMachine::Background);
+                           });
+        a->setShortcutContext(Qt::WidgetShortcut);
+    } else {
+        a = menu.addAction(ICONRES(QStringLiteral("del")), tr("Clear"),
+                           QKeySequence(Qt::ControlModifier | Qt::Key_L), this,
+                           &ScriptingConsole::clear);
+        a->setShortcutContext(Qt::WidgetShortcut);
+    }
 
     menu.exec(event->globalPos());
 }

@@ -40,6 +40,7 @@
 #include "class/wingmessagebox.h"
 #include "class/wingupdater.h"
 #include "control/toast.h"
+#include "define.h"
 #include "encodingdialog.h"
 #include "fileinfodialog.h"
 #include "finddialog.h"
@@ -130,7 +131,7 @@ MainWindow::MainWindow(SplashDialog *splash) : FramelessMainWindow() {
         m_status->addWidget(l);
         m_status->addWidget(m_lblsellen);
 
-        _status = new QLabel(m_status);
+        _status = new ScrollableLabel(m_status);
         m_status->addPermanentWidget(_status);
 
         auto separator = new QFrame(m_status);
@@ -245,7 +246,8 @@ MainWindow::MainWindow(SplashDialog *splash) : FramelessMainWindow() {
             sm.registerCallBack(ScriptMachine::Interactive, callbacks);
 
             callbacks.getInputFn = [this]() -> QString {
-                return WingInputDialog::getText(this, tr(""), tr(""));
+                return WingInputDialog::getText(this, tr("InputRequest"),
+                                                tr("PleaseInput"));
             };
             callbacks.clearFn = [this]() { m_bgScriptOutput->clear(); };
             callbacks.printMsgFn =
@@ -253,7 +255,11 @@ MainWindow::MainWindow(SplashDialog *splash) : FramelessMainWindow() {
                           std::placeholders::_1);
             sm.registerCallBack(ScriptMachine::Background, callbacks);
         } else {
-            // TODO
+            QMessageBox::critical(this, qAppName(),
+                                  tr("ScriptEngineInitFailed"));
+            set.setScriptEnabled(false);
+            set.save(SettingManager::SCRIPT);
+            throw CrashCode::ScriptInitFailed;
         }
 
         // At this time, AngelScript service plugin has started
@@ -601,6 +607,24 @@ ads::CDockAreaWidget *MainWindow::buildUpLogDock(ads::CDockManager *dock,
     m_logbrowser->setOpenExternalLinks(true);
     m_logbrowser->setUndoRedoEnabled(false);
 
+    auto a = newAction(
+        ICONRES("copy"), tr("Copy"), [=]() { m_logbrowser->copy(); },
+        QKeySequence::Copy);
+    a->setShortcutContext(Qt::WidgetShortcut);
+    m_logbrowser->addAction(a);
+
+    a = new QAction(this);
+    a->setSeparator(true);
+    m_logbrowser->addAction(a);
+
+    m_logbrowser->addAction(newAction(ICONRES(QStringLiteral("log")),
+                                      tr("ExportLog"),
+                                      &MainWindow::on_exportlog));
+    m_logbrowser->addAction(newAction(ICONRES(QStringLiteral("clearhis")),
+                                      tr("ClearLog"), &MainWindow::on_clslog));
+
+    m_logbrowser->setContextMenuPolicy(Qt::ActionsContextMenu);
+
     auto dw =
         buildDockWidget(dock, QStringLiteral("Log"), tr("Log"), m_logbrowser);
     return dock->addDockWidget(area, dw, areaw);
@@ -692,9 +716,16 @@ MainWindow::buildUpFindResultDock(ads::CDockManager *dock,
 
                 cursor->moveTo(fm->resultAt(index.row()).offset);
                 if (cursor->selectionCount() <= 1 && index.column() >= 3) {
-                    cursor->select(fm->lastFindData().length());
+                    cursor->select(fm->lastFindData().second);
                 }
             });
+
+    auto header = m_findresult->horizontalHeader();
+    auto font = QFontMetrics(m_findresult->font());
+    auto len = font.horizontalAdvance('F') * (15 + 16 * 2);
+    if (header->sectionSize(3) < len) {
+        header->resizeSection(3, len);
+    }
 
     auto dw = buildDockWidget(dock, QStringLiteral("FindResult"),
                               tr("FindResult") + QStringLiteral(" (ASCII)"),
@@ -797,15 +828,16 @@ MainWindow::buildUpHashResultDock(ads::CDockManager *dock,
     m_hashtable->setContextMenuPolicy(
         Qt::ContextMenuPolicy::ActionsContextMenu);
 
-    auto a = new QAction(m_hashtable);
-    a->setText(tr("Copy"));
-    connect(a, &QAction::triggered, this, [=] {
+    auto a = newAction(ICONRES(QStringLiteral("copy")), tr("Copy"), [=] {
         auto r = m_hashtable->currentIndex();
         qApp->clipboard()->setText(
             _hashModel->checkSumData(QCryptographicHash::Algorithm(r.row())));
         Toast::toast(this, NAMEICONRES(QStringLiteral("copy")),
                      tr("CopyToClipBoard"));
     });
+    m_hashtable->addAction(a);
+    a = newAction(QStringLiteral("del"), tr("Clear"),
+                  [=]() { _hashModel->clearData(); });
     m_hashtable->addAction(a);
     connect(m_hashtable->selectionModel(),
             &QItemSelectionModel::currentRowChanged, a,
@@ -979,18 +1011,17 @@ MainWindow::buildUpDecodingStrShowDock(ads::CDockManager *dock,
                               tr("DecodeText") + QStringLiteral(" (ASCII)"),
                               m_txtDecode);
 
-    auto menu = m_txtDecode->createStandardContextMenu();
-    menu->addSeparator();
-    auto a = new QAction(tr("Encoding"), this);
+    auto a = newAction(
+        ICONRES("copy"), tr("Copy"), [=]() { m_logbrowser->copy(); },
+        QKeySequence::Copy);
+    a->setShortcutContext(Qt::WidgetShortcut);
+    m_txtDecode->addAction(a);
+    a = new QAction(tr("Encoding"), this);
     a->setIcon(ICONRES(QStringLiteral("encoding")));
     connect(a, &QAction::triggered, this, &MainWindow::on_encoding);
-    menu->addAction(a);
+    m_txtDecode->addAction(a);
 
-    m_txtDecode->setContextMenuPolicy(Qt::CustomContextMenu);
-    connect(m_txtDecode, &QTextBrowser::customContextMenuRequested, this,
-            [=](const QPoint &pos) {
-                menu->popup(m_txtDecode->viewport()->mapToGlobal(pos));
-            });
+    m_txtDecode->setContextMenuPolicy(Qt::ActionsContextMenu);
 
     connect(m_txtDecode, &QTextBrowser::windowTitleChanged, dw,
             &QDockWidget::setWindowTitle);
@@ -1010,6 +1041,15 @@ MainWindow::buildUpScriptConsoleDock(ads::CDockManager *dock,
                 showStatus(QStringLiteral("<b><font color=\"gold\">") +
                            content + QStringLiteral("</font></b>"));
             });
+    connect(m_scriptConsole, &ScriptingConsole::abortEvaluation, this,
+            [this]() {
+                auto &sm = ScriptMachine::instance();
+                if (sm.isRunning(ScriptMachine::Interactive)) {
+                    sm.abortScript(ScriptMachine::Interactive);
+                } else {
+                    m_scriptConsole->abortCurrentCode();
+                }
+            });
 
     auto dw = buildDockWidget(dock, QStringLiteral("ScriptConsole"),
                               tr("ScriptConsole"), m_scriptConsole);
@@ -1021,7 +1061,35 @@ MainWindow::buildUpScriptBgOutputDock(ads::CDockManager *dock,
                                       ads::DockWidgetArea area,
                                       ads::CDockAreaWidget *areaw) {
     m_bgScriptOutput = new QPlainTextEdit(this);
+    m_bgScriptOutput->setPlaceholderText(tr("BgScriptOutputHere"));
     m_bgScriptOutput->setReadOnly(true);
+
+    auto a = newAction(
+        ICONRES(QStringLiteral("mStr")), tr("SelectAll"),
+        [this]() { m_bgScriptOutput->selectAll(); }, QKeySequence::SelectAll);
+    a->setShortcutContext(Qt::WidgetShortcut);
+    m_bgScriptOutput->addAction(a);
+    a = newAction(
+        ICONRES(QStringLiteral("copy")), tr("Copy"),
+        [this]() { m_bgScriptOutput->copy(); }, QKeySequence::Copy);
+    a->setShortcutContext(Qt::WidgetShortcut);
+    m_bgScriptOutput->addAction(a);
+    a = newAction(ICONRES(QStringLiteral("del")), tr("Clear"),
+                  [this]() { m_bgScriptOutput->clear(); });
+    a->setShortcutContext(Qt::WidgetShortcut);
+    m_bgScriptOutput->addAction(a);
+    a = new QAction(this);
+    a->setSeparator(true);
+    m_bgScriptOutput->addAction(a);
+    a = newAction(
+        ICONRES(QStringLiteral("dbgstop")), tr("AbortScript"),
+        []() {
+            ScriptMachine::instance().abortScript(ScriptMachine::Background);
+        },
+        QKeySequence(Qt::ControlModifier | Qt::Key_Q));
+    a->setShortcutContext(Qt::WidgetShortcut);
+    m_bgScriptOutput->addAction(a);
+    m_bgScriptOutput->setContextMenuPolicy(Qt::ActionsContextMenu);
 
     auto dw = buildDockWidget(dock, QStringLiteral("BgScriptOutput"),
                               tr("BgScriptOutput"), m_bgScriptOutput);
@@ -1462,7 +1530,8 @@ RibbonTabContent *MainWindow::buildScriptPage(RibbonTabContent *tab) {
         pannel->setVisible(false);
         connect(pannel, &RibbonButtonGroup::emptyStatusChanged, this,
                 [pannel](bool isEmpty) { pannel->setVisible(!isEmpty); });
-        _scriptMaps = ScriptManager::buildUpRibbonScriptRunner(pannel);
+        _scriptContexts =
+            ScriptManager::buildUpScriptRunnerContext(pannel, this);
         m_scriptDBGroup = pannel;
     }
 
@@ -2013,7 +2082,10 @@ void MainWindow::on_pastefile() {
     if (hexeditor == nullptr) {
         return;
     }
-    hexeditor->Paste();
+    if (!hexeditor->Paste()) {
+        Toast::toast(this, NAMEICONRES(QStringLiteral("paste")),
+                     tr("PasteFailedNote"));
+    }
 }
 
 void MainWindow::on_delete() {
@@ -2055,9 +2127,6 @@ void MainWindow::on_findfile() {
     auto hexeditor = editor->hexEditor();
 
     static FindDialog::FindInfo info;
-    info.isBigFile = editor->isBigFile();
-    info.start = 0;
-    info.stop = hexeditor->documentBytes();
     info.isSel = hexeditor->selectionCount() == 1;
 
     FindDialog fd(info, this);
@@ -2071,7 +2140,6 @@ void MainWindow::on_findfile() {
         ExecAsync<EditorView::FindError>(
             [this, r]() -> EditorView::FindError {
                 m_isfinding = true;
-
                 return currentEditor()->find(r);
             },
             [this](EditorView::FindError err) {
@@ -2095,6 +2163,14 @@ void MainWindow::on_findfile() {
                 if (result) {
                     m_findEncoding.value(result->encoding())->setChecked(true);
                 }
+
+                auto header = m_findresult->horizontalHeader();
+                auto font = QFontMetrics(m_findresult->font());
+                auto len = font.horizontalAdvance('F') * (15 + 16 * 2);
+                if (header->sectionSize(3) < len) {
+                    header->resizeSection(3, len);
+                }
+
                 m_find->raise();
 
                 m_isfinding = false;
@@ -2539,7 +2615,7 @@ void MainWindow::on_exportfindresult() {
 
         auto d = findresitem->lastFindData();
 
-        fobj.insert(QStringLiteral("find"), d);
+        fobj.insert(QStringLiteral("find"), d.first);
         QJsonArray arr;
         for (int i = 0; i < c; i++) {
             auto data = findresitem->resultAt(i);
@@ -2980,6 +3056,11 @@ void MainWindow::registerEditorView(EditorView *editor, const QString &ws) {
                     });
         }
     }
+
+    for (auto &m : _scriptContexts) {
+        editor->registerQMenu(m);
+    }
+
     for (auto &m : m_hexContextMenu) {
         editor->registerQMenu(m);
     }
@@ -3162,6 +3243,37 @@ void MainWindow::connectEditorView(EditorView *editor) {
     connect(editor, &EditorView::sigOnPasteHex, this, &MainWindow::on_pastehex);
     connect(editor, &EditorView::sigOnPasteFile, this,
             &MainWindow::on_pastefile);
+
+    editor->setProperty("__RELOAD__", false);
+    connect(editor, &EditorView::need2Reload, this, [editor, this]() {
+        if (editor->isBigFile()) {
+            auto fileName = editor->fileName();
+            if (!QFile::exists(fileName)) {
+                activateWindow();
+                raise();
+                editor->raise();
+                WingMessageBox::critical(this, tr("Error"),
+                                         tr("FileCloseBigFile"));
+                closeEditor(editor, true);
+            }
+            if (currentEditor() == editor) {
+                editor->reload();
+            } else {
+                editor->setProperty("__RELOAD__", true);
+            }
+        } else {
+            editor->hexEditor()->document()->setDocSaved(false);
+            if (currentEditor() == editor) {
+                auto ret = WingMessageBox::question(this, tr("Reload"),
+                                                    tr("ReloadNeededYesOrNo"));
+                if (ret == QMessageBox::Yes) {
+                    editor->reload();
+                }
+            } else {
+                editor->setProperty("__RELOAD__", true);
+            }
+        }
+    });
 }
 
 void MainWindow::swapEditor(EditorView *old, EditorView *cur) {
@@ -3188,6 +3300,19 @@ void MainWindow::swapEditor(EditorView *old, EditorView *cur) {
 
     Q_ASSERT(cur);
     auto hexeditor = cur->hexEditor();
+    auto needReload = cur->property("__RELOAD__").toBool();
+    if (needReload) {
+        if (cur->isBigFile()) {
+            cur->reload();
+        } else {
+            auto ret = WingMessageBox::question(this, tr("Reload"),
+                                                tr("ReloadNeededYesOrNo"));
+            if (ret == QMessageBox::Yes) {
+                cur->reload();
+            }
+        }
+        cur->setProperty("__RELOAD__", false);
+    }
     connect(hexeditor, &QHexView::cursorLocationChanged, this,
             &MainWindow::on_locChanged);
     connect(hexeditor, &QHexView::cursorSelectionChanged, this,

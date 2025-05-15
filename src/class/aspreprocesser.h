@@ -35,6 +35,7 @@
 #pragma warning(disable : 4786)
 #endif
 
+#include <QEventLoop>
 #include <QMap>
 #include <QSet>
 #include <QVector>
@@ -62,6 +63,16 @@ typedef int (*PRAGMACALLBACK_t)(const QByteArray &pragmaText,
 // Helper class for loading and pre-processing script files to
 // support include directives declarations
 
+/** for macros, we support:
+ *      * #if <conditions>
+ *      * #else
+ *      * #endif
+ *      * #define <word>
+ *      * #define <word> <string|int64|double>
+ *      * #undef <word>
+ *      * #ifdef <word>
+ *      * #ifndef <word>
+ */
 class AsPreprocesser {
 public:
     explicit AsPreprocesser(asIScriptEngine *engine);
@@ -81,6 +92,8 @@ public:
     int loadSectionFromFile(const QString &filename);
     int loadSectionFromMemory(const QString &section, const QByteArray &code);
 
+    void addScriptSection(const QString &section, const QByteArray &code);
+
     QList<ScriptData> scriptData() const;
 
     // Returns the engine
@@ -93,25 +106,42 @@ public:
     void setPragmaCallback(PRAGMACALLBACK_t callback, void *userParam);
 
     // Add a pre-processor define for conditional compilation
-    void defineWord(const QString &word);
+    bool defineWord(const QString &word, const QByteArray &value = {});
 
     // Enumerate included script sections
     unsigned int sectionCount() const;
 
     QString sectionName(unsigned int idx) const;
 
+    bool isCodeCompleteMode() const;
+    void setIsCodeCompleteMode(bool newIsCodeCompleteMode);
+
+    QHash<QString, QByteArray> definedMacros() const;
+
+protected:
+    QString translate(const char *str);
+
 protected:
     void clearAll();
-    void addScriptSection(const QString &section, const QByteArray &code);
+
     int processScriptSection(const QByteArray &script,
                              const QString &sectionname);
     int loadScriptSection(const QString &filename);
     bool includeIfNotAlreadyIncluded(const QString &filename);
 
-    int skipStatement(const QByteArray &modifiedScript, int pos);
+    int skipStatement(QByteArray &modifiedScript, int pos);
 
-    int excludeCode(QByteArray &modifiedScript, int pos);
+    int excludeIfCode(QByteArray &modifiedScript, int pos);
+    int excludeElseCode(QByteArray &modifiedScript, int pos);
     void overwriteCode(QByteArray &modifiedScript, int start, int len);
+    int getLineCount(const QByteArray &modifiedScript, int pos) const;
+
+    bool endLinePassFailed(const QByteArray &modifiedScript, int pos);
+
+    QByteArray processIfExpression(const QByteArray &codes, int currentLine,
+                                   const QByteArray &currentSection);
+
+    QByteArray findReplaceResult(const QByteArray &v);
 
     asIScriptEngine *engine;
     QList<ScriptData> modifiedScripts;
@@ -124,7 +154,10 @@ protected:
 
     QStringList includedScripts;
 
-    QStringList definedWords;
+    QHash<QString, QByteArray> definedWords;
+
+private:
+    bool _isCodeCompleteMode = false;
 };
 
 #endif // ASPREPROCESSER_H

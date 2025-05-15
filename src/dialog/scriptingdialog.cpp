@@ -38,6 +38,7 @@
 #include <QPainter>
 #include <QPicture>
 #include <QStatusBar>
+#include <QToolTip>
 
 constexpr auto EMPTY_FUNC = [] {};
 
@@ -71,7 +72,7 @@ ScriptingDialog::ScriptingDialog(QWidget *parent)
     layout->addWidget(m_dock, 1);
 
     m_status = new QStatusBar(this);
-    _status = new QLabel(this);
+    _status = new ScrollableLabel(this);
     m_status->addPermanentWidget(_status);
     layout->addWidget(m_status);
     buildUpContent(cw);
@@ -506,7 +507,7 @@ RibbonTabContent *ScriptingDialog::buildDebugPage(RibbonTabContent *tab) {
         bool isDbg = false;
         bool isPaused = false;
 
-        isRun = runner.isRunning();
+        isRun = runner.isRunning(ScriptMachine::Scripting);
         isDbg = runner.isDebugMode();
         auto dbg = runner.debugger();
         isPaused = dbg->currentState() == asDebugger::PAUSE;
@@ -583,6 +584,7 @@ ScriptingDialog::buildUpOutputShowDock(ads::CDockManager *dock,
                                        ads::CDockAreaWidget *areaw) {
     m_consoleout = new ScriptingConsole(this);
     m_consoleout->setMode(ScriptingConsole::Output);
+    m_consoleout->setIsTerminal(false);
     auto dw = buildDockWidget(dock, QStringLiteral("ConsoleOutput"),
                               tr("ConsoleOutput"), m_consoleout);
     return dock->addDockWidget(area, dw, areaw);
@@ -740,7 +742,8 @@ void ScriptingDialog::registerEditorView(ScriptEditor *editor) {
         Q_ASSERT(m_views.contains(editor));
 
         auto &m = ScriptMachine::instance();
-        if (m.isRunning() && _DebugingEditor == editor) {
+        if (m.isRunning(ScriptMachine::Scripting) &&
+            _DebugingEditor == editor) {
             if (WingMessageBox::warning(
                     this, this->windowTitle(), tr("ScriptStillRunning"),
                     QMessageBox::Yes | QMessageBox::No) == QMessageBox::No) {
@@ -797,6 +800,21 @@ void ScriptingDialog::registerEditorView(ScriptEditor *editor) {
                 _status->setText(QStringLiteral("<b><font color=\"gold\">") +
                                  message + QStringLiteral("</font></b>"));
             });
+
+    connect(editor, &ScriptEditor::need2Reload, this, [editor, this]() {
+        editor->editor()->setContentModified(true);
+        if (currentEditor() == editor) {
+            activateWindow();
+            raise();
+            auto ret = WingMessageBox::question(this, tr("Reload"),
+                                                tr("ReloadNeededYesOrNo"));
+            if (ret == QMessageBox::Yes) {
+                editor->reload();
+            }
+        } else {
+            editor->setProperty("__RELOAD__", true);
+        }
+    });
 
     m_views.append(editor);
 
@@ -872,6 +890,19 @@ void ScriptingDialog::swapEditor(ScriptEditor *old, ScriptEditor *cur) {
 
     m_curEditor = cur;
     updateCursorPosition();
+
+    if (cur) {
+        auto needReload = cur->property("__RELOAD__").toBool();
+        if (needReload) {
+            auto ret = WingMessageBox::question(this, tr("Reload"),
+                                                tr("ReloadNeededYesOrNo"));
+            if (ret == QMessageBox::Yes) {
+                cur->reload();
+            }
+
+            cur->setProperty("__RELOAD__", false);
+        }
+    }
 }
 
 void ScriptingDialog::updateRunDebugMode(bool disable) {
@@ -881,7 +912,7 @@ void ScriptingDialog::updateRunDebugMode(bool disable) {
     bool isDbg = false;
     bool isPaused = false;
 
-    isRun = runner.isRunning();
+    isRun = runner.isRunning(ScriptMachine::Scripting);
     isDbg = runner.isDebugMode();
     auto dbg = runner.debugger();
     isPaused = dbg->currentState() == asDebugger::PAUSE;
@@ -1368,7 +1399,8 @@ void ScriptingDialog::on_runscript() {
         PluginSystem::instance().scriptPragmaBegin();
 
         editor->setReadOnly(true);
-        // ScriptMachine::instance().executeScript(editor->fileName());
+        ScriptMachine::instance().executeScript(ScriptMachine::Scripting,
+                                                editor->fileName());
         editor->setReadOnly(false);
         updateRunDebugMode();
     }
@@ -1437,7 +1469,7 @@ void ScriptingDialog::on_removebreakpoint() {
 
 void ScriptingDialog::closeEvent(QCloseEvent *event) {
     auto &runner = ScriptMachine::instance();
-    if (runner.isRunning()) {
+    if (runner.isRunning(ScriptMachine::Scripting)) {
         if (WingMessageBox::warning(
                 this, this->windowTitle(), tr("ScriptStillRunning"),
                 QMessageBox::Yes | QMessageBox::No) == QMessageBox::No) {

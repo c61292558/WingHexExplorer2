@@ -40,6 +40,10 @@ signals:
 public:
     QString getInput();
 
+    bool isTerminal() const;
+
+    void setIsTerminal(bool newIsTerminal);
+
 public slots:
     void init();
 
@@ -48,6 +52,8 @@ public slots:
     void processKeyEvent(QKeyEvent *e);
 
     void onOutput(const ScriptMachine::MessageInfo &message);
+
+    void abortCurrentCode();
 
 private slots:
     void applyScriptSettings();
@@ -64,10 +70,13 @@ protected:
 
 protected slots:
     virtual void onCompletion(const QModelIndex &index) override;
+    virtual void paste() override;
 
 private:
     QString _codes;
 
+    bool _isTerminal = true;
+    bool _isWaitingRead = false;
     std::function<QString(void)> _getInputFn;
 };
 

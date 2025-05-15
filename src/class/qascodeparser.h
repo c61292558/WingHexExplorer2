@@ -90,6 +90,7 @@ public:
         Visiblity vis = QAsCodeParser::Visiblity::Public;
         QByteArray additonalInfo; // for other additonal info
 
+        QByteArrayList inherit;
         QList<Symbol> children;
     };
 
@@ -105,12 +106,8 @@ public:
     QList<Symbol> parseAndIntell(qsizetype offset, const QByteArray &codes);
 
 public:
-    // utilities
-    static bool isConstant(int tokenType);
-    static bool isOperator(int tokenType);
-    static bool isPreOperator(int tokenType);
-    static bool isPostOperator(int tokenType);
-    static bool isAssignOperator(int tokenType);
+    static eTokenType getToken(asIScriptEngine *engine, const char *string,
+                               size_t stringLength, size_t *tokenLength);
 
 private:
     QList<QAsCodeParser::CodeSegment> parseScript(bool inBlock);
@@ -134,7 +131,7 @@ private:
     CodeSegment parseInterface();
     CodeSegment parseFuncDef();
     CodeSegment parseFunction();
-    CodeSegment parseFunctionMethod();
+    CodeSegment parseFunctionMethod(Visiblity &vis);
 
 private:
     // parse tokens
@@ -160,7 +157,7 @@ private:
 
     QByteArrayList parseOptionalScope();
 
-    QList<Symbol> parseDeclaration(const QByteArrayList &ns,
+    QList<Symbol> parseDeclaration(qsizetype end, const QByteArrayList &ns,
                                    bool isClassProp = false,
                                    bool isGlobalVar = false);
 
@@ -172,12 +169,13 @@ private:
 
     Symbol parseFuncDefContent(const QByteArrayList &ns);
 
-    QList<Symbol> parseClassContent(qsizetype offset, const QByteArrayList &ns,
-                                    const QByteArray &code);
+    QPair<QByteArrayList, QList<Symbol>>
+    parseClassContent(qsizetype offset, const QByteArrayList &ns,
+                      const QByteArray &code);
 
-    QList<Symbol> parseInterfaceContent(qsizetype offset,
-                                        const QByteArrayList &ns,
-                                        const QByteArray &code);
+    QPair<QByteArrayList, QList<Symbol>>
+    parseInterfaceContent(qsizetype offset, const QByteArrayList &ns,
+                          const QByteArray &code);
 
     QList<Symbol> parseStatementBlock(const QByteArrayList &ns,
                                       const QByteArray &code, qsizetype end);

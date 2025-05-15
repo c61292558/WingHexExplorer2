@@ -5,6 +5,7 @@ enum class CrashCode : int {
     AlreadyStart,
     LanguageFile,
     PluginSetting,
+    ScriptInitFailed,
     GenericCallNotSupported
 };
 
@@ -15,6 +16,8 @@ enum AsUserDataType {
     UserData_PluginFn,
     UserData_isDbg,
     UserData_ContextMode,
+    UserData_Timer,
+    UserData_TimeOut
 };
 }
 

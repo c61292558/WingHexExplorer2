@@ -18,13 +18,17 @@
 #ifndef SCRIPTMACHINE_H
 #define SCRIPTMACHINE_H
 
+#include "AngelScript/sdk/add_on/contextmgr/contextmgr.h"
 #include "AngelScript/sdk/angelscript/include/angelscript.h"
+
 #include "class/aspreprocesser.h"
 
 #include "asdebugger.h"
-#include "class/ascontextmgr.h"
 
 #include <QObject>
+#include <QQueue>
+
+class CScriptArray;
 
 class ScriptMachine : public QObject {
     Q_OBJECT
@@ -34,9 +38,9 @@ private:
 public:
     // we have three console modes
     enum ConsoleMode {
-        Interactive, // in a shell
-        Scripting,   // in scripting dialog
-        Background   // run codes from other way
+        Interactive = 1, // in a shell
+        Scripting,       // in scripting dialog
+        Background,      // run codes from other way
     };
 
 public:
@@ -97,24 +101,25 @@ private:
     explicit ScriptMachine();
     Q_DISABLE_COPY_MOVE(ScriptMachine)
 
-public:
+private:
     asIScriptModule *createModule(ConsoleMode mode);
     asIScriptModule *createModuleIfNotExist(ConsoleMode mode);
-    asIScriptModule *module(ConsoleMode mode);
     bool isModuleExists(ConsoleMode mode);
 
 public:
-    static ScriptMachine &instance();
+    asIScriptModule *module(ConsoleMode mode);
 
-    virtual ~ScriptMachine();
+    static ScriptMachine &instance();
+    void destoryMachine();
 
 public:
     bool init();
     bool isInited() const;
-    bool isRunning(ConsoleMode mode = Scripting) const;
+    bool isRunning(ConsoleMode mode) const;
 
     static void registerEngineAddon(asIScriptEngine *engine);
     static void registerEngineAssert(asIScriptEngine *engine);
+    static void registerEngineClipboard(asIScriptEngine *engine);
 
     void registerCallBack(ConsoleMode mode, const RegCallBacks &callbacks);
 
@@ -123,9 +128,16 @@ public:
 
     asIScriptEngine *engine() const;
 
+    void outputMessage(const MessageInfo &info);
+
 public:
     static void scriptAssert(bool b);
     static void scriptAssert_X(bool b, const QString &msg);
+
+    static void clip_setText(const QString &text);
+    static void clip_setBinary(const CScriptArray &array);
+    static QString clip_getText();
+    static CScriptArray *clip_getBinary();
 
     static void scriptThrow(const QString &msg);
 
@@ -141,9 +153,12 @@ public slots:
     bool executeCode(ConsoleMode mode, const QString &code);
     // only scripting mode can be debugged
     bool executeScript(ConsoleMode mode, const QString &script,
-                       bool isInDebug = false);
+                       bool isInDebug = false, int *retCode = nullptr);
 
-    void abortDbgScript(ConsoleMode mode);
+    int evaluateDefine(const QString &code, bool &result);
+
+    void abortDbgScript();
+    void abortScript(ConsoleMode mode);
     void abortScript();
 
 protected:
@@ -151,17 +166,20 @@ protected:
 
     QString getCallStack(asIScriptContext *context);
 
-    void destoryMachine();
-
 private:
-    void print(void *ref, int typeId);
+    static void print(asIScriptGeneric *args);
+    static void println(asIScriptGeneric *args);
+
     QString getInput();
-    void outputMessage(ConsoleMode mode, const MessageInfo &info);
 
     bool isType(asITypeInfo *tinfo, RegisteredType type);
 
     static int execSystemCmd(QString &out, const QString &exe,
                              const QString &params, int timeout);
+
+    static QString beautify(const QString &str, uint indent);
+
+    QString stringify(void *ref, int typeId);
 
 private:
     static void messageCallback(const asSMessageInfo *msg, void *param);
@@ -196,12 +214,14 @@ signals:
 private:
     asIScriptEngine *_engine = nullptr;
     asDebugger *_debugger = nullptr;
-    asContextMgr *_ctxMgr = nullptr;
-    QVector<asIScriptContext *> _ctxPool;
+    CContextMgr *_ctxMgr = nullptr;
+
+    QQueue<asIScriptContext *> _ctxPool;
 
     QVector<asITypeInfo *> _rtypes;
     QMap<ConsoleMode, RegCallBacks> _regcalls;
-    ConsoleMode _curMode = ConsoleMode::Background;
+    QMap<ConsoleMode, asIScriptContext *> _ctx;
+    ConsoleMode _curMsgMode = ConsoleMode::Background;
 };
 
 Q_DECLARE_METATYPE(ScriptMachine::MessageInfo)

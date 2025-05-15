@@ -18,6 +18,7 @@
 #ifndef EDITORVIEW_H
 #define EDITORVIEW_H
 
+#include <QFileSystemWatcher>
 #include <QReadWriteLock>
 #include <QStackedWidget>
 
@@ -224,9 +225,7 @@ private:
     bool checkHasUnsavedState() const;
 
     FindResultModel::FindInfo readContextFinding(qsizetype offset,
-                                                 qsizetype findSize,
-                                                 int contextSize,
-                                                 int maxDisplayBytes);
+                                                 qsizetype findSize);
 
     void applyFunctionTables(WingHex::WingEditorViewWidget *view,
                              const CallTable &fns);
@@ -537,7 +536,10 @@ private:
         parent->addAction(a);
     }
 
+private:
     void connectDocSavedFlag(EditorView *editor);
+    void removeMonitorPaths();
+    void addMonitorPath();
 
 signals:
     void sigOnCutFile();
@@ -552,6 +554,8 @@ signals:
     void sigOnFill();
     void sigOnMetadata();
     void sigOnBookMark();
+
+    void need2Reload();
 
 protected:
     bool eventFilter(QObject *watched, QEvent *event) override;
@@ -589,6 +593,7 @@ private:
 
     QReadWriteLock _rwlock;
     CallTable _viewFns;
+    QFileSystemWatcher _watcher;
 };
 
 #endif // EDITORVIEW_H

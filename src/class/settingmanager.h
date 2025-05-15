@@ -59,7 +59,7 @@ private:
         EDITOR_SHOW_ADDR = 1u << 11,
         EDITOR_SHOW_COL = 1u << 12,
         EDITOR_SHOW_TEXT = 1u << 13,
-        // EDITOR_ENCODING = 1u << 14, // Reserved
+        SCRIPT_TIMEOUT = 1u << 14,
         EDITOR_FIND_MAXCOUNT = 1u << 15,
         EDITOR_COPY_LIMIT = 1u << 16,
         EDITOR_DECSTRLIMIT = 1u << 17,
@@ -119,6 +119,8 @@ public:
     void save(SETTINGS cat = SETTING::ALL);
     void reset(SETTINGS cat);
 
+    void __reset(SETTINGS cat);
+
     QList<RecentFileManager::RecentInfo> recentHexFiles() const;
     void
     setRecentFiles(const QList<RecentFileManager::RecentInfo> &newRecentFiles);
@@ -171,6 +173,9 @@ public:
 
     qsizetype logCount() const;
     void setLogCount(qsizetype newLogCount);
+
+    int scriptTimeout() const;
+    void setScriptTimeout(int newScriptTimeout);
 
 public:
     void checkWriteableAndWarn();
@@ -228,6 +233,8 @@ private:
     bool m_checkUpdate = false;
     int m_logLevel = 0;
     qsizetype m_logCount = 20;
+
+    int m_scriptTimeout = 60; // min
 
 private:
     QFont _defaultFont;

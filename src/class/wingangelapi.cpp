@@ -1188,13 +1188,15 @@ QByteArray WingAngelAPI::cArray2ByteArray(const CScriptArray &array, int byteID,
         return {};
     }
 
+    auto len = array.GetSize();
+
     QByteArray buffer;
-    buffer.reserve(array.GetSize());
+    buffer.resize(len);
     array.AddRef();
-    for (asUINT i = 0; i < array.GetSize(); ++i) {
-        auto item = reinterpret_cast<const asBYTE *>(array.At(i));
-        buffer.append(*item);
-    }
+
+    std::memcpy(buffer.data(), const_cast<CScriptArray &>(array).GetBuffer(),
+                len);
+
     array.Release();
     return buffer;
 }
@@ -1899,20 +1901,43 @@ bool WingAngelAPI::execScriptCode(const WingHex::SenderInfo &sender,
 
 bool WingAngelAPI::execScript(const WingHex::SenderInfo &sender,
                               const QString &fileName) {
-    auto handles = _handles;
-    auto ret = ScriptMachine::instance().executeScript(
-        ScriptMachine::Background, fileName);
-    cleanUpHandles(handles);
-    return ret;
+
+    auto exec = [this, fileName]() -> bool {
+        auto handles = _handles;
+        auto ret = ScriptMachine::instance().executeScript(
+            ScriptMachine::Background, fileName);
+        cleanUpHandles(handles);
+        return ret;
+    };
+
+    if (QThread::currentThread() != qApp->thread()) {
+        bool ret = false;
+        QMetaObject::invokeMethod(qApp, exec, Qt::BlockingQueuedConnection,
+                                  &ret);
+        return ret;
+    } else {
+        return exec();
+    }
 }
 
 bool WingAngelAPI::execCode(const WingHex::SenderInfo &sender,
                             const QString &code) {
-    auto handles = _handles;
-    auto ret =
-        ScriptMachine::instance().executeCode(ScriptMachine::Background, code);
-    cleanUpHandles(handles);
-    return ret;
+    auto exec = [this, code]() -> bool {
+        auto handles = _handles;
+        auto ret = ScriptMachine::instance().executeCode(
+            ScriptMachine::Background, code);
+        cleanUpHandles(handles);
+        return ret;
+    };
+
+    if (QThread::currentThread() != qApp->thread()) {
+        bool ret = false;
+        QMetaObject::invokeMethod(qApp, exec, Qt::BlockingQueuedConnection,
+                                  &ret);
+        return ret;
+    } else {
+        return exec();
+    }
 }
 
 QVector<void *> WingAngelAPI::retriveAsCArray(const WingHex::SenderInfo &sender,
@@ -1970,9 +1995,7 @@ void *WingAngelAPI::vector2AsArray(const WingHex::SenderInfo &sender,
     if (info) {
         auto len = content.length();
         auto arr = CScriptArray::Create(info, len);
-        for (decltype(len) i = 0; i < len; ++i) {
-            arr->SetValue(i, content.at(i));
-        }
+        std::memcpy(arr->GetBuffer(), content.data(), len);
         return arr;
     }
     return nullptr;
@@ -1980,6 +2003,10 @@ void *WingAngelAPI::vector2AsArray(const WingHex::SenderInfo &sender,
 
 void *WingAngelAPI::list2AsArray(const WingHex::SenderInfo &sender,
                                  MetaType type, const QList<void *> &content) {
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+    static_assert(std::is_same_v<QList<int>, QVector<int>>);
+    return vector2AsArray(sender, type, content);
+#else
     Q_UNUSED(sender);
     auto typeStr = PluginSystem::type2AngelScriptString(
         MetaType(type | MetaType::Array), false, true);
@@ -1998,6 +2025,7 @@ void *WingAngelAPI::list2AsArray(const WingHex::SenderInfo &sender,
         return arr;
     }
     return nullptr;
+#endif
 }
 
 void WingAngelAPI::deleteAsArray(const WingHex::SenderInfo &sender,

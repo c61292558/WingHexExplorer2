@@ -109,6 +109,15 @@ QString QConsoleWidget::getCommandLine() {
     return code;
 }
 
+void QConsoleWidget::paste() {
+    QTextCursor textCursor = this->textCursor();
+    const QMimeData *const clipboard = QApplication::clipboard()->mimeData();
+    const QString text = clipboard->text();
+    if (!text.isNull()) {
+        textCursor.insertText(text, channelCharFormat(StandardInput));
+    }
+}
+
 void QConsoleWidget::handleReturnKey() {
     QString code = getCommandLine();
 
@@ -189,12 +198,7 @@ void QConsoleWidget::keyPressEvent(QKeyEvent *e) {
     // Allow paste only if the selection is in the interactive area ...
     if (e->key() == Qt::Key_V && e->modifiers() == Qt::ControlModifier) {
         if (selectionInEditZone || isCursorInEditZone()) {
-            const QMimeData *const clipboard =
-                QApplication::clipboard()->mimeData();
-            const QString text = clipboard->text();
-            if (!text.isNull()) {
-                textCursor.insertText(text, channelCharFormat(StandardInput));
-            }
+            paste();
         }
 
         e->accept();
@@ -361,16 +365,15 @@ void QConsoleWidget::replaceCommandLine(const QString &str) {
 }
 
 QString QConsoleWidget::currentCommandLine() const {
-    // Select the text after the last command prompt ...
     QTextCursor textCursor = this->textCursor();
     textCursor.movePosition(QTextCursor::End);
     textCursor.setPosition(inpos_, QTextCursor::KeepAnchor);
-
     return textCursor.selectedText();
 }
 
+int QConsoleWidget::currentHeaderPos() const { return inpos_; }
+
 void QConsoleWidget::write(const QString &message, const QTextCharFormat &fmt) {
-    QTextCharFormat currfmt = currentCharFormat();
     QTextCursor tc = textCursor();
 
     if (mode() == Input) {
@@ -396,8 +399,8 @@ void QConsoleWidget::write(const QString &message, const QTextCharFormat &fmt) {
         inpos_ = tc.position() - inpos_;
         // restore the edit pos
         tc.movePosition(QTextCursor::Left, QTextCursor::MoveAnchor, editpos);
+        tc.setCharFormat({});
         setTextCursor(tc);
-        setCurrentCharFormat(currfmt);
     } else {
         // in output mode messages are ed
         QTextCursor tc1 = tc;
@@ -411,6 +414,8 @@ void QConsoleWidget::write(const QString &message, const QTextCharFormat &fmt) {
         setTextCursor(tc1);
         textCursor().insertText(message, fmt);
         ensureCursorVisible();
+
+        tc.setCharFormat({});
 
         // restore cursor if needed
         if (needsRestore)

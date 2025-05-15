@@ -20,6 +20,7 @@
 
 #include "control/asobjtreewidget.h"
 #include "control/scriptingconsole.h"
+#include "control/scrollablelabel.h"
 #include "dialog/settingdialog.h"
 #include "framelessmainwindow.h"
 
@@ -170,7 +171,7 @@ private:
     template <typename Func>
     inline QAction *newAction(const QString &title, Func &&slot,
                               const QKeySequence &shortcut = QKeySequence()) {
-        auto a = new QAction;
+        auto a = new QAction(this);
         a->setText(title);
         a->setShortcutVisibleInContextMenu(true);
         a->setShortcut(shortcut);
@@ -301,7 +302,7 @@ private:
 
     ScriptEditor *_DebugingEditor;
 
-    QLabel *_status = nullptr;
+    ScrollableLabel *_status = nullptr;
 };
 
 #endif // SCRIPTINGDIALOG_H

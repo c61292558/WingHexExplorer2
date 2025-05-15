@@ -1,3 +1,20 @@
+/*==============================================================================
+** Copyright (C) 2024-2027 WingSummer
+**
+** This program is free software: you can redistribute it and/or modify it under
+** the terms of the GNU Affero General Public License as published by the Free
+** Software Foundation, version 3.
+**
+** This program is distributed in the hope that it will be useful, but WITHOUT
+** ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+** FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+** details.
+**
+** You should have received a copy of the GNU Affero General Public License
+** along with this program. If not, see <https://www.gnu.org/licenses/>.
+** =============================================================================
+*/
+
 #include "scriptingconsolebase.h"
 #include "class/wingconsolehighligher.h"
 #include "wingsyntaxhighlighter.h"
@@ -19,18 +36,47 @@ ScriptingConsoleBase::ScriptingConsoleBase(QWidget *parent)
 }
 
 void ScriptingConsoleBase::stdOut(const QString &str) {
-    writeStdOut(str);
-    dontHighlightLastLine(true);
+    auto lines = str.split('\n');
+    if (lines.isEmpty()) {
+        return;
+    }
+    writeStdOut(lines.takeFirst());
+    dontHighlightLastLine(false);
+    for (auto &l : lines) {
+        newLine();
+        writeStdOut(l);
+        dontHighlightLastLine(true);
+    }
 }
 
 void ScriptingConsoleBase::stdErr(const QString &str) {
-    writeStdErr(str);
+    auto lines = str.split('\n');
+    if (lines.isEmpty()) {
+        return;
+    }
+
+    writeStdErr(lines.takeFirst());
     dontHighlightLastLine(false);
+    for (auto &l : lines) {
+        newLine();
+        writeStdErr(l);
+        dontHighlightLastLine(false);
+    }
 }
 
 void ScriptingConsoleBase::stdWarn(const QString &str) {
-    write(str, _warnCharFmt);
+    auto lines = str.split('\n');
+    if (lines.isEmpty()) {
+        return;
+    }
+
+    write(lines.takeFirst(), _warnCharFmt);
     dontHighlightLastLine(false);
+    for (auto &l : lines) {
+        newLine();
+        write(l, _warnCharFmt);
+        dontHighlightLastLine(false);
+    }
 }
 
 void ScriptingConsoleBase::newLine() { _s << Qt::endl; }

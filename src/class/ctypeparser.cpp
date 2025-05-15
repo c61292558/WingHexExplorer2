@@ -151,6 +151,9 @@ void CTypeParser::initialize() {
     ADD_TYPE(longlong, QMetaType::LongLong);
     ADD_TYPE_U(ulonglong, QMetaType::ULongLong);
 
+    using uint = unsigned int;
+    ADD_TYPE_U(uint, QMetaType::UInt);
+
     using BOOL = bool;
     using BYTE = byte;
     using WORD = uint16;
@@ -242,6 +245,8 @@ void CTypeParser::initialize() {
 
 #undef ADD_TYPE
 #undef ADD_TYPE_S
+
+    base_types_ = type_maps_.keys();
 }
 
 void CTypeParser::setIncludePaths(const QStringList &paths) {
@@ -451,7 +456,7 @@ void CTypeParser::stripComments(QStringList &lines) const {
                        QStringLiteral("]");
 
         // search comment start
-        while ((pos = line.indexOf(kSlash, pos)) != -1) {
+        while ((pos = line.indexOf(char(kSlash), pos)) != -1) {
             if (line.length() <= pos + 1)
                 break; // the 1st '/' is at the end of line, so not a comment
 
@@ -627,7 +632,7 @@ TokenTypes CTypeParser::getTokenType(const QString &token) const {
         return keywords_.value(token);
     } else if (qualifiers_.contains(token)) {
         return kQualifier;
-    } else if (type_maps_.contains(token)) {
+    } else if (base_types_.contains(token)) {
         return kBasicDataType;
     } else if (struct_defs_.contains(token)) {
         return kStructName;
@@ -1065,7 +1070,7 @@ bool CTypeParser::parseDeclaration(const QString &line,
     if (line.isEmpty()) {
         return false;
     }
-    if (line[line.length() - 1] != kSemicolon)
+    if (line[line.length() - 1] != char(kSemicolon))
         return false;
 
     QStringList tokens;
@@ -1085,7 +1090,7 @@ bool CTypeParser::parseDeclaration(const QString &line,
         return false;
     }
 
-    if (tokens[++index].at(0) == kAsterisk) {
+    if (tokens[++index].at(0) == char(kAsterisk)) {
         decl.is_pointer = true;
         // size of a pointer is 4 types on a 32-bit system
         length =
@@ -1143,14 +1148,14 @@ bool CTypeParser::parseEnumDeclaration(const QString &line, int &last_value,
         break;
 
     case 2:
-        if (kComma != tokens[1].at(0)) {
+        if (char(kComma) != tokens[1].at(0)) {
             return false;
         }
         decl.second = ++last_value;
         break;
 
     case 3:
-        if (kEqual != tokens[1].at(0)) {
+        if (char(kEqual) != tokens[1].at(0)) {
             return false;
         }
 
@@ -1166,7 +1171,8 @@ bool CTypeParser::parseEnumDeclaration(const QString &line, int &last_value,
         break;
 
     case 4:
-        if (!(kEqual == tokens[1].at(0) && kComma == tokens[3].at(0))) {
+        if (!(char(kEqual) == tokens[1].at(0) &&
+              char(kComma) == tokens[3].at(0))) {
             return false;
         }
 
@@ -1203,8 +1209,8 @@ bool CTypeParser::parseAssignExpression(const QString &line) {
 
     // only 4 tokens for an assignment expression: var = number;
     if (4 == splitLineIntoTokens(line, tokens) &&
-        kEqual == tokens[1].at(tokens[1].length() - 1) &&
-        kSemicolon == tokens[3].at(tokens[3].length() - 1) &&
+        char(kEqual) == tokens[1].at(tokens[1].length() - 1) &&
+        char(kSemicolon) == tokens[3].at(tokens[3].length() - 1) &&
         isNumericToken(tokens[2], number)) {
         const_defs_.insert(tokens[0], number);
         return true;
@@ -1239,7 +1245,7 @@ bool CTypeParser::parsePreProcDirective(const QString &src, qsizetype &pos) {
         }
 
         // only handle header file included with ""
-        if (kQuotation == token[token.length() - 1]) {
+        if (char(kQuotation) == token[token.length() - 1]) {
             // get included header file name
             if (!getNextToken(src, pos, token, false)) {
                 return false;
@@ -1366,7 +1372,7 @@ bool CTypeParser::parseStructUnion(const bool is_struct, const bool is_typedef,
             if (is_typedef) {
                 // format 1
                 if (!(getNextToken(src, pos, next_token) &&
-                      kSemicolon == next_token.at(0))) {
+                      char(kSemicolon) == next_token.at(0))) {
                     return false;
                 }
 
@@ -1387,7 +1393,7 @@ bool CTypeParser::parseStructUnion(const bool is_struct, const bool is_typedef,
                     type_maps_[type_name] = type_maps_[type_alias];
                 }
             } else { // non-typedef
-                if (kSemicolon == token.at(0)) {
+                if (char(kSemicolon) == token.at(0)) {
                     // format 2
                     is_decl = false;
                     if (type_name.isEmpty()) {
@@ -1542,7 +1548,7 @@ bool CTypeParser::parseEnum(const bool is_typedef, const QString &src,
             if (is_typedef) {
                 // format 1
                 if (!(getNextToken(src, pos, next_token) &&
-                      kSemicolon == next_token.at(0))) {
+                      char(kSemicolon) == next_token.at(0))) {
                     return false;
                 }
 
@@ -1559,7 +1565,7 @@ bool CTypeParser::parseEnum(const bool is_typedef, const QString &src,
                     ;
                 }
             } else { // non-typedef
-                if (kSemicolon == token.at(0)) {
+                if (char(kSemicolon) == token.at(0)) {
                     // format 2
                     is_decl = false;
                     if (type_name.isEmpty()) {

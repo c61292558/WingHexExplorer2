@@ -360,7 +360,7 @@ private:
     template <typename Func>
     inline QAction *newAction(const QString &title, Func &&slot,
                               const QKeySequence &shortcut = QKeySequence()) {
-        auto a = new QAction;
+        auto a = new QAction(this);
         a->setText(title);
         a->setShortcutVisibleInContextMenu(true);
         a->setShortcut(shortcut);
@@ -466,7 +466,7 @@ signals:
 private:
     Ribbon *m_ribbon = nullptr;
     ads::CDockManager *m_dock = nullptr;
-    QLabel *_status = nullptr;
+    ScrollableLabel *_status = nullptr;
 
     QString m_encoding;
 
@@ -524,7 +524,7 @@ private:
 
     RibbonButtonGroup *m_scriptDBGroup = nullptr;
     RibbonButtonGroup *m_pluginSettingsGroup = nullptr;
-    ScriptManager::ScriptActionMaps _scriptMaps;
+    QList<QMenu *> _scriptContexts;
 
     //===================================================
 

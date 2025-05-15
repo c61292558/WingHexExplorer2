@@ -21,6 +21,8 @@
 #include "WingCodeEdit/wingcompleter.h"
 #include "class/asdatabase.h"
 
+class AsPreprocesser;
+
 class AsCompletion : public WingCompleter {
     Q_OBJECT
 public:
@@ -32,9 +34,6 @@ public:
 public:
     virtual QString wordSeperators() const override;
 
-    bool parseDocument() const;
-    void setParseDocument(bool newParseDocument);
-
     void clearFunctionTip();
 
 protected:
@@ -42,6 +41,11 @@ protected:
                                 const QString &content) override;
 
     virtual QList<CodeInfoTip> parseDocument();
+
+    virtual QList<CodeInfoTip> parseMarcos();
+
+    QList<CodeInfoTip> parseScriptData(qsizetype offset,
+                                       const QByteArray &code);
 
 signals:
     void onFunctionTip(const QString &content);
@@ -56,8 +60,27 @@ private:
     void applyClassNodes(QList<CodeInfoTip> &nodes);
 
 private:
+    static int includeCallBack(const QString &include, bool quotedInclude,
+                               const QString &from, AsPreprocesser *builder,
+                               void *userParam);
+
+private:
+    struct CompleteDB {
+        QList<CodeInfoTip> data;
+        QByteArray md5;
+        uint time = 0;
+    };
+
+    QHash<QString, CompleteDB> comdb;
+
+    void pushCompleteDBData(const QString &fileName,
+                            const QList<CodeInfoTip> &data);
+    std::optional<CompleteDB> getCompleteDBData(const QString &fileName);
+    void remoteCompleteDBData(const QString &fileName);
+    void clearCompleteDBUnused();
+
+private:
     ASDataBase parser;
-    bool m_parseDocument;
 };
 
 #endif // _CPP_COMPLETION_H_

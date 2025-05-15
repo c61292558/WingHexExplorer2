@@ -21,10 +21,13 @@
 #include "class/aspreprocesser.h"
 #include "class/qascodeparser.h"
 #include "class/scriptmachine.h"
+#include "control/scripteditor.h"
 #include "model/codecompletionmodel.h"
+#include "utilities.h"
 #include "wingcodeedit.h"
 
 #include <QAbstractItemView>
+#include <QApplication>
 #include <QByteArray>
 #include <QDir>
 #include <QEvent>
@@ -39,15 +42,17 @@ Q_GLOBAL_STATIC_WITH_ARGS(QByteArray, DOT_TRIGGER, ("."))
 Q_GLOBAL_STATIC_WITH_ARGS(QByteArray, DBL_COLON_TRIGGER, ("::"))
 Q_GLOBAL_STATIC_WITH_ARGS(QByteArray, LEFT_PARE_TRIGGER, ("("))
 Q_GLOBAL_STATIC_WITH_ARGS(QByteArray, SEMI_COLON_TRIGGER, (";"))
+Q_GLOBAL_STATIC_WITH_ARGS(QByteArray, SHARP_TRIGGER, ("#"))
 
 AsCompletion::AsCompletion(WingCodeEdit *p)
-    : WingCompleter(p), parser(ScriptMachine::instance().engine()),
-      m_parseDocument(true) {
+    : WingCompleter(p), parser(ScriptMachine::instance().engine()) {
     setTriggerList({*DOT_TRIGGER, *DBL_COLON_TRIGGER,
                     // unleash the power of call tips
                     *LEFT_PARE_TRIGGER,
                     // clear the tips
-                    *SEMI_COLON_TRIGGER});
+                    *SEMI_COLON_TRIGGER,
+                    // for marcos
+                    *SHARP_TRIGGER});
     setTriggerAmount(3);
 
     connect(this, QOverload<const QModelIndex &>::of(&AsCompletion::activated),
@@ -99,6 +104,15 @@ void AsCompletion::applyEmptyNsNode(QList<CodeInfoTip> &nodes,
             tip.name = p.nameSpace;
             nodes.append(tip);
         }
+
+        if (p.type == CodeInfoTip::Type::Class) {
+            for (auto &c : p.children) {
+                if (c.type == CodeInfoTip::Type::ClsFunction ||
+                    c.type == CodeInfoTip::Type::Property) {
+                    nodes.append(c);
+                }
+            }
+        }
     }
 
     nodes.append(emptyNsNodes);
@@ -112,7 +126,7 @@ void AsCompletion::applyClassNodes(QList<CodeInfoTip> &nodes) {
             for (auto &item : n) {
                 if (item.type == CodeInfoTip::Type::Class) {
                     for (auto &c : item.children) {
-                        if (c.type == CodeInfoTip::Type::Function) {
+                        if (c.type == CodeInfoTip::Type::ClsFunction) {
                             if (!c.addinfo.contains(CodeInfoTip::RetType)) {
                                 continue;
                             }
@@ -126,21 +140,100 @@ void AsCompletion::applyClassNodes(QList<CodeInfoTip> &nodes) {
     nodes = clsNodes;
 }
 
-bool AsCompletion::parseDocument() const { return m_parseDocument; }
+int AsCompletion::includeCallBack(const QString &include, bool quotedInclude,
+                                  const QString &from, AsPreprocesser *builder,
+                                  void *userParam) {
+    auto p = reinterpret_cast<AsCompletion *>(userParam);
 
-void AsCompletion::setParseDocument(bool newParseDocument) {
-    m_parseDocument = newParseDocument;
+    QFileInfo info(include);
+    bool isAbsolute = info.isAbsolute();
+    bool hasNoExt = info.suffix().isEmpty();
+    QString inc;
+    if (quotedInclude) {
+        if (isAbsolute) {
+            inc = include;
+        } else {
+            auto editor = qobject_cast<ScriptEditor *>(p->widget()->parent());
+            Q_ASSERT(editor);
+            auto pwd = QFileInfo(editor->fileName()).absoluteDir();
+            inc = pwd.absoluteFilePath(include);
+        }
+    } else {
+        // absolute include is not allowed in #include<>
+        if (isAbsolute) {
+            // ignored in code completion
+            return asSUCCESS;
+        }
+
+        QDir dir(qApp->applicationDirPath());
+        if (!dir.cd(QStringLiteral("aslib"))) {
+            // someone crash the software, ignored
+            return asSUCCESS;
+        }
+        inc = dir.absoluteFilePath(include);
+    }
+
+    if (hasNoExt) {
+        inc += QStringLiteral(".as");
+    }
+
+    builder->loadSectionFromFile(inc);
+    return asSUCCESS;
+}
+
+void AsCompletion::pushCompleteDBData(const QString &fileName,
+                                      const QList<CodeInfoTip> &data) {
+    if (!QFile::exists(fileName)) {
+        return;
+    }
+
+    CompleteDB c;
+    c.data = data;
+    c.md5 = Utilities::getMd5(fileName);
+    c.time = 3;
+
+    comdb.insert(fileName, c);
+}
+
+void AsCompletion::remoteCompleteDBData(const QString &fileName) {
+    comdb.remove(fileName);
+}
+
+std::optional<AsCompletion::CompleteDB>
+AsCompletion::getCompleteDBData(const QString &fileName) {
+    if (comdb.contains(fileName)) {
+        auto ret = comdb[fileName];
+        ret.time++;
+        return ret;
+    }
+    return std::nullopt;
+}
+
+void AsCompletion::clearCompleteDBUnused() {
+    for (auto &c : comdb) {
+        c.time--;
+    }
+    comdb.removeIf(
+        [](const QPair<QString, CompleteDB> &c) { return c.second.time == 0; });
 }
 
 void AsCompletion::clearFunctionTip() { emit onFunctionTip({}); }
 
 QString AsCompletion::wordSeperators() const {
-    static QString eow(QStringLiteral("~!@#$%^&*()_+{}|\"<>?,/;'[]\\-="));
+    static QString eow(QStringLiteral("~!@$%^&*()_+{}|\"<>?,/;'[]\\-="));
     return eow;
 }
 
 bool AsCompletion::processTrigger(const QString &trigger,
                                   const QString &content) {
+    QList<CodeInfoTip> nodes;
+
+    if (trigger == *SHARP_TRIGGER) {
+        setModel(new CodeCompletionModel(parseMarcos(), this));
+        setCompletionPrefix({});
+        return true;
+    }
+
     if (content.isEmpty()) {
         return false;
     }
@@ -152,13 +245,6 @@ bool AsCompletion::processTrigger(const QString &trigger,
 
     auto len = content.length();
     auto code = content.toUtf8();
-
-    QList<CodeInfoTip> nodes;
-    QList<CodeInfoTip> docNodes;
-
-    if (m_parseDocument) {
-        docNodes = parseDocument();
-    }
 
     if (!trigger.isEmpty() && trigger != *DOT_TRIGGER) {
         clearFunctionTip();
@@ -226,24 +312,42 @@ bool AsCompletion::processTrigger(const QString &trigger,
         return false;
     }
 
-    QString prefix;
     auto etoken = tokens.back();
+    // it can not be any trigger, so take the last as prefix
+    QString prefix = etoken.content;
+
     if (etoken.type == asTC_VALUE || etoken.type == asTC_COMMENT ||
         etoken.type == asTC_UNKNOWN) {
         popup()->hide();
         return false;
     }
 
+    if (trigger.isEmpty() && popup()->isVisible()) {
+        setCompletionPrefix(prefix);
+        return true;
+    }
+
+    if (trigger.isEmpty() && tokens.length() > 1) {
+        auto t = std::next(tokens.rbegin());
+        if (t->content == "#") {
+            setModel(new CodeCompletionModel(parseMarcos(), this));
+            setCompletionPrefix(prefix);
+            return true;
+        }
+    }
+
+    QList<CodeInfoTip> docNodes = parseDocument();
+
     // if trigger is empty, it's making editing
     if (trigger.isEmpty()) {
-        // it can not be any trigger, so take the last as prefix
-        prefix = etoken.content;
         tokens.removeLast();
         if (tokens.isEmpty()) {
             applyEmptyNsNode(nodes, docNodes);
         } else {
             etoken = tokens.back(); // checking later
         }
+    } else {
+        prefix.clear();
     }
 
     if (nodes.isEmpty()) {
@@ -257,6 +361,8 @@ bool AsCompletion::processTrigger(const QString &trigger,
                 processTrigger(*DOT_TRIGGER, content.left(etoken.pos));
                 setCompletionPrefix(prefix);
                 return true;
+            } else if (etoken.content == QByteArrayLiteral(")")) {
+                // ignore
             } else {
                 applyEmptyNsNode(nodes, docNodes);
             }
@@ -266,8 +372,66 @@ bool AsCompletion::processTrigger(const QString &trigger,
         }
 
         if (trigger == *DOT_TRIGGER) {
-            // member guessing ?
-            applyClassNodes(nodes);
+            if (etoken.type == asTC_IDENTIFIER) {
+                // member type guessing ? basic match is enough. (>n<)
+                auto isBasicType = [](const QByteArray &type) {
+                    static QByteArrayList basicType{
+                        "int",   "int8",   "int16",  "int32",  "int64",
+                        "uint",  "uint8",  "uint16", "uint32", "uint64",
+                        "float", "double", "byte"};
+
+                    return basicType.contains(type);
+                };
+
+                auto clsNodes = parser.classNodes();
+
+                // filter the type we can use to auto-complete in docNodes
+                for (auto &item : docNodes) {
+                    if (item.type == CodeInfoTip::Type::Class) {
+                        auto name = item.nameSpace;
+                        if (name.isEmpty()) {
+                            name = item.name;
+                        } else {
+                            name += QStringLiteral("::") + item.name;
+                        }
+                        clsNodes.insert(name, item.children);
+                    }
+                    // a typedef can only be used to define an alias
+                    // for primitive types, so NO NEED for auto-completing
+                }
+
+                tokens.removeLast();
+                auto ns = getNamespace(tokens);
+                for (auto &item : docNodes) {
+                    if (etoken.content == item.name && ns == item.nameSpace) {
+                        auto retType = item.addinfo.value(CodeInfoTip::RetType);
+                        auto decl = engine->GetTypeInfoByDecl(retType.toUtf8());
+                        if (decl) {
+                            QByteArray type = decl->GetNamespace();
+                            if (type.isEmpty()) {
+                                type = decl->GetName();
+                            } else {
+                                type +=
+                                    (QByteArrayLiteral("::") + decl->GetName());
+                            }
+
+                            // auto type inference is not supported.
+                            // PRs will be welcomed !!!
+                            if (isBasicType(type)) {
+                                popup()->hide();
+                                return false;
+                            }
+
+                            nodes.append(clsNodes.value(type));
+                            break;
+                        }
+                    }
+                }
+            }
+
+            if (nodes.isEmpty()) {
+                applyClassNodes(nodes);
+            }
         } else if (etoken.content.length() >= triggerAmount()) {
             // completion for a.b.c or a::b.c or a::b::c.d or ::a::b.c
             if (trigger == *DBL_COLON_TRIGGER) {
@@ -333,8 +497,8 @@ QList<CodeInfoTip> AsCompletion::parseDocument() {
 
     // first preprocess the code
     AsPreprocesser prepc(engine);
-    // TODO: set include callback
-    // prepc.setIncludeCallback();
+    prepc.setIsCodeCompleteMode(true);
+    prepc.setIncludeCallback(&AsCompletion::includeCallBack, this);
 
     auto r = prepc.loadSectionFromMemory(QStringLiteral("ASCOMPLETION"),
                                          code.toUtf8());
@@ -345,69 +509,154 @@ QList<CodeInfoTip> AsCompletion::parseDocument() {
     auto data = prepc.scriptData();
     QList<CodeInfoTip> ret;
 
+    auto marcos = prepc.definedMacros();
+    for (auto pkey = marcos.keyBegin(); pkey != marcos.keyEnd(); pkey++) {
+        CodeInfoTip tip;
+        tip.type = CodeInfoTip::Type::KeyWord;
+        tip.dontAddGlobal = true;
+        tip.name = *pkey;
+        ret.append(tip);
+    }
+
     for (auto &d : data) {
-        QAsCodeParser parser(engine);
-        auto syms =
-            parser.parseAndIntell(editor->textCursor().position(), d.script);
+        qsizetype offset = -1;
+        QList<CodeInfoTip> dd;
 
-        for (auto &sym : syms) {
-            CodeInfoTip tip;
-            tip.name = sym.name;
-            tip.nameSpace = QString::fromUtf8(sym.scope.join("::"));
-
-            switch (sym.symtype) {
-            case QAsCodeParser::SymbolType::Function:
-            case QAsCodeParser::SymbolType::FnDef:
-                tip.type = CodeInfoTip::Type::Function;
-                tip.addinfo.insert(CodeInfoTip::RetType,
-                                   QString::fromUtf8(sym.type));
-                tip.addinfo.insert(CodeInfoTip::Args,
-                                   QString::fromUtf8(sym.additonalInfo));
-                for (auto &var : sym.children) {
-                    CodeInfoTip va;
-                    va.dontAddGlobal = true;
-                    va.name = var.name;
-                    va.nameSpace = QString::fromUtf8(var.scope.join("::"));
-                    va.type = CodeInfoTip::Type::Variable;
-                    ret.append(va);
+        if (d.section == QStringLiteral("ASCOMPLETION")) {
+            offset = editor->textCursor().position();
+        } else {
+            auto r = getCompleteDBData(d.section);
+            if (r) {
+                auto md5 = r->md5;
+                if (Utilities::getMd5(d.section) == md5) {
+                    dd = r->data;
+                } else {
+                    remoteCompleteDBData(d.section);
                 }
-                break;
-            case QAsCodeParser::SymbolType::Enum:
-                tip.type = CodeInfoTip::Type::Enum;
-                for (auto &e : sym.children) {
-                    CodeInfoTip en;
-                    en.dontAddGlobal = true;
-                    en.name = e.name;
-                    en.nameSpace = QString::fromUtf8(e.scope.join("::"));
-                    en.type = CodeInfoTip::Type::Enumerater;
-                    if (!e.additonalInfo.isEmpty()) {
-                        en.addinfo.insert(CodeInfoTip::Comment,
-                                          en.name + QStringLiteral(" = ") +
-                                              e.additonalInfo);
-                    }
-                    ret.append(en);
-                }
-                break;
-            case QAsCodeParser::SymbolType::TypeDef:
-                tip.type = CodeInfoTip::Type::KeyWord;
-                break;
-            case QAsCodeParser::SymbolType::Variable:
-                tip.type = CodeInfoTip::Type::Variable;
-                break;
-            case QAsCodeParser::SymbolType::Class:
-            case QAsCodeParser::SymbolType::Interface:
-                tip.type = CodeInfoTip::Type::Class;
-                for (auto &mem : sym.children) {
-                    // TODO
-                }
-                break;
-            case QAsCodeParser::SymbolType::Invalid:
-            case QAsCodeParser::SymbolType::Import:
-                continue;
             }
-
-            ret.append(tip);
         }
+
+        if (dd.isEmpty()) {
+            dd = parseScriptData(offset, d.script);
+            if (offset < 0) {
+                pushCompleteDBData(d.section, dd);
+            }
+        }
+        ret.append(dd);
+    }
+
+    return ret;
+}
+
+QList<CodeInfoTip> AsCompletion::parseMarcos() {
+    static QList<CodeInfoTip> marcos;
+    if (marcos.isEmpty()) {
+        QStringList m{"define", "undef",  "if",      "else",  "endif",
+                      "ifdef",  "ifndef", "include", "pragma"};
+        for (auto &i : m) {
+            CodeInfoTip tip;
+            tip.name = i;
+            tip.dontAddGlobal = true;
+            tip.type = CodeInfoTip::Type::KeyWord;
+            marcos.append(tip);
+        }
+    }
+    return marcos;
+}
+
+QList<CodeInfoTip> AsCompletion::parseScriptData(qsizetype offset,
+                                                 const QByteArray &code) {
+    QList<CodeInfoTip> ret;
+
+    auto engine = ScriptMachine::instance().engine();
+    QAsCodeParser parser(engine);
+    auto syms = parser.parseAndIntell(offset, code);
+
+    for (auto &sym : syms) {
+        CodeInfoTip tip;
+        tip.name = sym.name;
+        tip.nameSpace = QString::fromUtf8(sym.scope.join("::"));
+
+        switch (sym.symtype) {
+        case QAsCodeParser::SymbolType::Function:
+        case QAsCodeParser::SymbolType::FnDef:
+            tip.type = CodeInfoTip::Type::Function;
+            tip.addinfo.insert(CodeInfoTip::RetType,
+                               QString::fromUtf8(sym.type));
+            tip.addinfo.insert(CodeInfoTip::Args,
+                               QString::fromUtf8(sym.additonalInfo));
+            for (auto &var : sym.children) {
+                CodeInfoTip va;
+                va.dontAddGlobal = true;
+                va.name = var.name;
+                va.nameSpace = QString::fromUtf8(var.scope.join("::"));
+                va.addinfo.insert(CodeInfoTip::RetType, var.type);
+                va.type = CodeInfoTip::Type::Variable;
+                ret.append(va);
+            }
+            break;
+        case QAsCodeParser::SymbolType::Enum:
+            tip.type = CodeInfoTip::Type::Enum;
+            for (auto &e : sym.children) {
+                CodeInfoTip en;
+                en.dontAddGlobal = true;
+                en.name = e.name;
+                en.nameSpace = QString::fromUtf8(e.scope.join("::"));
+                en.type = CodeInfoTip::Type::Enumerater;
+                if (!e.additonalInfo.isEmpty()) {
+                    en.addinfo.insert(CodeInfoTip::Comment,
+                                      en.name + QStringLiteral(" = ") +
+                                          e.additonalInfo);
+                }
+                ret.append(en);
+            }
+            break;
+        case QAsCodeParser::SymbolType::TypeDef:
+            tip.type = CodeInfoTip::Type::TypeDef;
+            break;
+        case QAsCodeParser::SymbolType::Variable:
+            tip.addinfo.insert(CodeInfoTip::RetType, sym.type);
+            tip.type = CodeInfoTip::Type::Variable;
+            break;
+        case QAsCodeParser::SymbolType::Class:
+        case QAsCodeParser::SymbolType::Interface:
+            for (auto &mem : sym.children) {
+                if (mem.vis != QAsCodeParser::Visiblity::Public) {
+                    continue;
+                }
+                CodeInfoTip ctip;
+                ctip.name = mem.name;
+                ctip.nameSpace = QString::fromUtf8(mem.scope.join("::"));
+                if (mem.symtype == QAsCodeParser::SymbolType::Function) {
+                    ctip.type = CodeInfoTip::Type::Function;
+                    ctip.addinfo.insert(CodeInfoTip::RetType,
+                                        QString::fromUtf8(mem.type));
+                    ctip.addinfo.insert(CodeInfoTip::Args,
+                                        QString::fromUtf8(mem.additonalInfo));
+                    for (auto &var : mem.children) {
+                        CodeInfoTip va;
+                        va.dontAddGlobal = true;
+                        va.name = var.name;
+                        va.nameSpace = QString::fromUtf8(var.scope.join("::"));
+                        va.addinfo.insert(CodeInfoTip::RetType, var.type);
+                        va.type = CodeInfoTip::Type::Variable;
+                        tip.children.append(va);
+                    }
+                    tip.children.append(ctip);
+                } else if (mem.symtype == QAsCodeParser::SymbolType::Variable) {
+                    ctip.addinfo.insert(CodeInfoTip::RetType, mem.type);
+                    ctip.type = CodeInfoTip::Type::Variable;
+                    tip.children.append(ctip);
+                }
+            }
+            tip.type = CodeInfoTip::Type::Class;
+            break;
+        case QAsCodeParser::SymbolType::Invalid:
+        case QAsCodeParser::SymbolType::Import:
+            continue;
+        }
+
+        ret.append(tip);
     }
 
     return ret;

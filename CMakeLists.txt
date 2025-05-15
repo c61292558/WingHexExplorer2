@@ -8,7 +8,7 @@ set(CMAKE_AUTORCC ON)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(PROJECT_VERSION "2.2.1")
+set(PROJECT_VERSION "2.2.3")
 
 find_package(
     QT NAMES Qt6 Qt5 REQUIRED COMPONENTS Widgets Network Concurrent
@@ -21,12 +21,16 @@ message("Build ${PROJECT_NAME} with ${CMAKE_BUILD_TYPE}.")
 
 install(CODE "set(CMAKE_INSTALL_LOCAL_ONLY TRUE)" ALL_COMPONENTS)
 
+option(WINGHEX_USE_FRAMELESS ON)
 option(BUILD_TEST_PLUGIN OFF)
+option(BUILD_SHARED_MEM_EXT OFF)
+
+add_definitions(-DAS_NO_THREADS)
+
 if(BUILD_TEST_PLUGIN)
     add_subdirectory(TestPlugin)
 endif()
 
-option(BUILD_SHARED_MEM_EXT OFF)
 if(BUILD_SHARED_MEM_EXT)
     add_subdirectory(ShareMemoryDrv)
 endif()
@@ -35,9 +39,6 @@ add_definitions(-DWINGHEX_VERSION="${PROJECT_VERSION}"
                 -DAPP_ORG="WingCloudStudio" -DAPP_NAME="${PROJECT_NAME}")
 file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/WINGHEX_VERSION" ${PROJECT_VERSION})
 file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/QT_VERSION" ${QT_VERSION_MAJOR})
-
-option(WINGHEX_USE_FRAMELESS "Use borderless windows to ensure UI uniformity"
-       TRUE)
 
 if(WIN32)
     find_package(QT NAMES Qt6 Qt5 REQUIRED AxContainer)
@@ -66,7 +67,7 @@ if(WINGHEX_USE_FRAMELESS)
     option(QWINDOWKIT_BUILD_STATIC "Build static libraries" TRUE)
     option(QWINDOWKIT_INSTALL "Install library" OFF)
     add_subdirectory(3rdparty/qwindowkit)
-    add_definitions(-DWINGHEX_USE_FRAMELESS)
+    add_compile_definitions(WINGHEX_USE_FRAMELESS)
 endif()
 
 set(CMAKE_POLICY_DEFAULT_CMP0077 NEW)
@@ -193,8 +194,6 @@ set(CONTROL_SRC
     src/control/qlistviewext.cpp
     src/control/asobjtreewidget.h
     src/control/asobjtreewidget.cpp
-    src/control/qtlonglongspinbox.cpp
-    src/control/qtlonglongspinbox.h
     src/control/dockwidgettab.h
     src/control/dockwidgettab.cpp
     src/control/qhextextedit.h
@@ -208,7 +207,9 @@ set(CONTROL_SRC
     src/control/gotolinewidget.h
     src/control/gotolinewidget.cpp
     src/control/codeeditcontrolwidget.h
-    src/control/codeeditcontrolwidget.cpp)
+    src/control/codeeditcontrolwidget.cpp
+    src/control/scrollablelabel.h
+    src/control/scrollablelabel.cpp)
 
 set(CLASS_SRC
     src/class/logger.cpp
@@ -253,8 +254,6 @@ set(CLASS_SRC
     src/class/ascompletion.h
     src/class/asbuilder.h
     src/class/asbuilder.cpp
-    src/class/ascontextmgr.h
-    src/class/ascontextmgr.cpp
     src/class/clangformatmanager.h
     src/class/clangformatmanager.cpp
     src/class/aspreprocesser.h
@@ -356,7 +355,8 @@ set(SCRIPT_ADDON_SRC
     src/scriptaddon/scriptjson.h
     src/scriptaddon/scriptjson.cpp
     src/scriptaddon/scriptfile.cpp
-    src/scriptaddon/scriptfile.h)
+    src/scriptaddon/scriptfile.h
+    src/scriptaddon/aspromise.hpp)
 
 # localization support
 file(

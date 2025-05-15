@@ -77,6 +77,10 @@ public:
     // get the current command line
     QString getCommandLine();
 
+    virtual void paste();
+
+    int currentHeaderPos() const;
+
 public slots:
 
     // write to StandardOutput
@@ -94,6 +98,7 @@ signals:
 protected:
     bool canPaste() const;
     bool canCut() const;
+
     virtual void handleReturnKey();
     virtual void handleTabKey();
     // reimp QPlainTextEdit functions
@@ -112,7 +117,6 @@ protected:
     static History history_;
     ConsoleMode mode_;
     int inpos_;
-    QString currentMultiLineCode_;
     QConsoleIODevice *iodevice_;
     QTextCharFormat chanFormat_[nConsoleChannels];
 };
