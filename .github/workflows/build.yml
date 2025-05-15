@@ -38,6 +38,17 @@ jobs:
         echo "version=${VERSION}" >> $GITHUB_OUTPUT
         echo "Using version: ${VERSION}"
         
+    - name: Update Debian control version
+      run: |
+        # 取出 version 输出，并去掉前导 'v'（可选）
+        RAW_VERSION="${{ steps.version.outputs.version }}"
+        # 如果你的 tag 是 v1.2.3 格式，下面这行会去掉前导 v
+        DEB_VERSION="${RAW_VERSION#v}"
+        echo "Updating debian/DEBIAN/control Version: → $DEB_VERSION"
+        sed -i "s/^Version:.*/Version: $DEB_VERSION/" debian/DEBIAN/control
+        echo "--- control file now ---"
+        grep '^Version:' -n debian/DEBIAN/control
+        
       
       
     - name: Checkout code submodules
