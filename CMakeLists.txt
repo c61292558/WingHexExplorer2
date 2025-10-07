@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.18)
+cmake_minimum_required(VERSION 3.20)
 
 project(WingHexExplorer2 LANGUAGES CXX)
 
@@ -8,7 +8,7 @@ set(CMAKE_AUTORCC ON)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(PROJECT_VERSION "2.2.3")
+set(PROJECT_VERSION "2.3.0")
 
 find_package(QT NAMES Qt6 REQUIRED COMPONENTS Widgets Network Concurrent
                                               PrintSupport Xml LinguistTools)
@@ -23,9 +23,25 @@ install(CODE "set(CMAKE_INSTALL_LOCAL_ONLY TRUE)" ALL_COMPONENTS)
 option(WINGHEX_USE_FRAMELESS ON)
 option(BUILD_TEST_PLUGIN OFF)
 option(BUILD_SHARED_MEM_EXT OFF)
+option(ANGEL_LSP ON)
 
 add_definitions(-DAS_NO_THREADS)
 add_definitions(-DWING_SYSTEM_NAME="${CMAKE_SYSTEM_NAME}")
+
+if(DEFINED CMAKE_CXX_BYTE_ORDER AND CMAKE_CXX_BYTE_ORDER)
+    if(CMAKE_CXX_BYTE_ORDER STREQUAL "BIG_ENDIAN")
+        add_definitions(-DWING_LITTLE_ENDIAN=0)
+    elseif(CMAKE_CXX_BYTE_ORDER STREQUAL "LITTLE_ENDIAN")
+        add_definitions(-DWING_LITTLE_ENDIAN=1)
+    else()
+        message(
+            FATAL_ERROR
+                "CMAKE_CXX_BYTE_ORDER defined but unknown value: ${CMAKE_CXX_BYTE_ORDER}"
+        )
+    endif()
+else()
+    message(FATAL_ERROR "CMAKE_CXX_BYTE_ORDER not set or empty")
+endif()
 
 if(BUILD_TEST_PLUGIN)
     add_subdirectory(TestPlugin)
@@ -99,7 +115,38 @@ set(NUMCAL_GRAMMAR
     src/grammar/NumCal/NumCalVisitor.cpp
     src/grammar/NumCal/NumCalVisitor.h)
 
-set(ANTLR4_GRAMMAR ${NUMCAL_GRAMMAR})
+set(CSTRUCT_GRAMMAR
+    src/grammar/c/CStructVisitor.h
+    src/grammar/c/CStructBaseVisitor.cpp
+    src/grammar/c/CStructLexer.cpp
+    src/grammar/c/CStructParser.cpp
+    src/grammar/c/CStructVisitor.cpp
+    src/grammar/c/CStructBaseVisitor.h
+    src/grammar/c/CStructLexer.h
+    src/grammar/c/CStructParser.h)
+
+set(ASCONSOLE_GRAMMAR
+    src/grammar/ASConsole/AngelscriptConsoleLexer.cpp
+    src/grammar/ASConsole/AngelscriptConsoleParser.cpp
+    src/grammar/ASConsole/AngelscriptConsoleParserBaseVisitor.cpp
+    src/grammar/ASConsole/AngelscriptConsoleParserVisitor.cpp
+    src/grammar/ASConsole/AngelscriptConsoleLexer.h
+    src/grammar/ASConsole/AngelscriptConsoleParser.h
+    src/grammar/ASConsole/AngelscriptConsoleParserBaseVisitor.h
+    src/grammar/ASConsole/AngelscriptConsoleParserVisitor.h)
+
+set(SNIPPET_GRAMMAR
+    src/grammar/Snippet/SnippetVisitor.h
+    src/grammar/Snippet/SnippetVisitor.cpp
+    src/grammar/Snippet/SnippetParser.h
+    src/grammar/Snippet/SnippetParser.cpp
+    src/grammar/Snippet/SnippetLexer.h
+    src/grammar/Snippet/SnippetLexer.cpp
+    src/grammar/Snippet/SnippetBaseVisitor.h
+    src/grammar/Snippet/SnippetBaseVisitor.cpp)
+
+set(ANTLR4_GRAMMAR ${NUMCAL_GRAMMAR} ${CSTRUCT_GRAMMAR} ${ASCONSOLE_GRAMMAR}
+                   ${SNIPPET_GRAMMAR})
 
 set(ANGEL_SCRIPT_ADDON_ROOT
     "${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/AngelScript/sdk/add_on")
@@ -107,8 +154,6 @@ set(ANGEL_SCRIPT_ADDON
     ${ANGEL_SCRIPT_ADDON_ROOT}/autowrapper/aswrappedcall.h
     ${ANGEL_SCRIPT_ADDON_ROOT}/contextmgr/contextmgr.cpp
     ${ANGEL_SCRIPT_ADDON_ROOT}/contextmgr/contextmgr.h
-    ${ANGEL_SCRIPT_ADDON_ROOT}/scriptany/scriptany.cpp
-    ${ANGEL_SCRIPT_ADDON_ROOT}/scriptany/scriptany.h
     ${ANGEL_SCRIPT_ADDON_ROOT}/scriptarray/scriptarray.cpp
     ${ANGEL_SCRIPT_ADDON_ROOT}/scriptarray/scriptarray.h
     ${ANGEL_SCRIPT_ADDON_ROOT}/scriptgrid/scriptgrid.cpp
@@ -124,9 +169,20 @@ set(ANGEL_SCRIPT_ADDON
     ${ANGEL_SCRIPT_ADDON_ROOT}/serializer/serializer.cpp
     ${ANGEL_SCRIPT_ADDON_ROOT}/serializer/serializer.h
     ${ANGEL_SCRIPT_ADDON_ROOT}/weakref/weakref.cpp
-    ${ANGEL_SCRIPT_ADDON_ROOT}/weakref/weakref.h)
+    ${ANGEL_SCRIPT_ADDON_ROOT}/weakref/weakref.h
+    ${ANGEL_SCRIPT_ADDON_ROOT}/datetime/datetime.cpp
+    ${ANGEL_SCRIPT_ADDON_ROOT}/datetime/datetime.h
+    ${ANGEL_SCRIPT_ADDON_ROOT}/scriptfile/scriptfile.cpp
+    ${ANGEL_SCRIPT_ADDON_ROOT}/scriptfile/scriptfile.h
+    ${ANGEL_SCRIPT_ADDON_ROOT}/scriptfile/scriptfilesystem.cpp
+    ${ANGEL_SCRIPT_ADDON_ROOT}/scriptfile/scriptfilesystem.h)
 
 add_subdirectory(3rdparty/qtsingleapplication)
+add_subdirectory(3rdparty/fmt)
+
+set(AS_DEBUGGER_SRC
+    3rdparty/as-debugger/as_debugger.cpp 3rdparty/as-debugger/as_debugger.h
+    3rdparty/as-debugger/as_helpers.cpp 3rdparty/as-debugger/as_helpers.h)
 
 set(RIBBON_SRC
     3rdparty/QWingRibbon/ribbon.cpp
@@ -188,6 +244,17 @@ set(DIALOG_SRC
     src/dialog/definitiondownload.cpp
     src/dialog/definitiondownload.h)
 
+set(STRUCT_LIB_SRC
+    src/structlib/cstructerrorlistener.cpp
+    src/structlib/cstructerrorlistener.h
+    src/structlib/cstructerrorstrategy.cpp
+    src/structlib/cstructerrorstrategy.h
+    src/structlib/cstructvisitorparser.cpp
+    src/structlib/cstructvisitorparser.h
+    src/structlib/ctypeparser.cpp
+    src/structlib/ctypeparser.h
+    src/structlib/structdefine.h)
+
 set(CONTROL_SRC
     src/control/codeedit.h
     src/control/codeedit.cpp
@@ -216,8 +283,8 @@ set(CONTROL_SRC
     src/control/asobjtreewidget.cpp
     src/control/dockwidgettab.h
     src/control/dockwidgettab.cpp
-    src/control/qhextextedit.h
-    src/control/qhextextedit.cpp
+    src/control/hexlineedit.h
+    src/control/hexlineedit.cpp
     src/control/popupactionwidget.h
     src/control/popupactionwidget.cpp
     src/control/settingspopup.cpp
@@ -228,8 +295,10 @@ set(CONTROL_SRC
     src/control/gotolinewidget.cpp
     src/control/codeeditcontrolwidget.h
     src/control/codeeditcontrolwidget.cpp
-    src/control/scrollablelabel.h
-    src/control/scrollablelabel.cpp)
+    src/control/consolecodeedit.h
+    src/control/consolecodeedit.cpp
+    src/control/asidbtreeview.h
+    src/control/asidbtreeview.cpp)
 
 set(CLASS_SRC
     src/class/logger.cpp
@@ -259,21 +328,13 @@ set(CLASS_SRC
     src/class/settingmanager.cpp
     src/class/asdebugger.h
     src/class/asdebugger.cpp
-    src/class/angelobjstring.h
-    src/class/angelobjstring.cpp
     src/class/appmanager.h
     src/class/appmanager.cpp
     src/class/angelscripthelper.h
-    src/class/asdatabase.cpp
-    src/class/asdatabase.h
-    src/class/qascodeparser.h
-    src/class/qascodeparser.cpp
     src/class/ascompletion.cpp
     src/class/ascompletion.h
     src/class/asbuilder.h
     src/class/asbuilder.cpp
-    src/class/clangformatmanager.h
-    src/class/clangformatmanager.cpp
     src/class/aspreprocesser.h
     src/class/aspreprocesser.cpp
     src/class/layoutmanager.h
@@ -311,12 +372,23 @@ set(CLASS_SRC
     src/class/editorviewcontext.h
     src/class/editorviewcontext.cpp
     src/class/consolehighlighanim.h
-    src/class/consolehighlighanim.cpp)
+    src/class/consolehighlighanim.cpp
+    src/class/angellsp.h
+    src/class/angellsp.cpp
+    src/class/lsp.h
+    src/class/resettabletimer.h
+    src/class/resettabletimer.cpp
+    src/class/astype_evaluator.h
+    src/class/angelscriptconsolevisitor.h
+    src/class/angelscriptconsolevisitor.cpp
+    src/class/aswingcache.h
+    src/class/aswingcache.cpp
+    src/class/lspeditorinterface.h
+    src/class/snippetprocessor.h
+    src/class/snippetprocessor.cpp)
 
-set(INTERNAL_PLG_SRC
-    src/class/wingangelapi.h src/class/wingangelapi.cpp
-    src/class/ctypeparser.cpp src/class/ctypeparser.h src/class/wingcstruct.h
-    src/class/wingcstruct.cpp)
+set(INTERNAL_PLG_SRC src/class/wingangelapi.h src/class/wingangelapi.cpp
+                     src/class/wingcstruct.h src/class/wingcstruct.cpp)
 
 if(WINGHEX_USE_FRAMELESS)
     set(WIDGET_FRAME_SRC
@@ -342,10 +414,12 @@ set(MODEL_SRC
     src/model/checksummodel.cpp
     src/model/dbgcallstackmodel.h
     src/model/dbgcallstackmodel.cpp
-    src/model/dbgvarshowmodel.h
-    src/model/dbgvarshowmodel.cpp
     src/model/codecompletionmodel.h
-    src/model/codecompletionmodel.cpp)
+    src/model/codecompletionmodel.cpp
+    src/model/asidbtreemodel.h
+    src/model/asidbtreemodel.cpp
+    src/model/asidbwatchmodel.h
+    src/model/asidbwatchmodel.cpp)
 
 set(SETTING_SRC
     src/settings/settings.h
@@ -364,9 +438,9 @@ set(SETTING_SRC
     src/settings/othersettingsdialog.h
     src/settings/othersettingsdialog.cpp
     src/settings/othersettingsdialog.ui
-    src/settings/clangformatsetdialog.h
-    src/settings/clangformatsetdialog.cpp
-    src/settings/clangformatsetdialog.ui
+    src/settings/lspsettingdialog.h
+    src/settings/lspsettingdialog.cpp
+    src/settings/lspsettingdialog.ui
     src/settings/qeditconfig.h
     src/settings/qeditconfig.cpp
     src/settings/qeditconfig.ui)
@@ -382,11 +456,10 @@ set(SCRIPT_ADDON_SRC
     src/scriptaddon/scriptcolor.cpp
     src/scriptaddon/scriptjson.h
     src/scriptaddon/scriptjson.cpp
-    src/scriptaddon/scriptfile.cpp
-    src/scriptaddon/scriptfile.h
-    src/scriptaddon/aspromise.hpp
     src/scriptaddon/scriptenv.h
-    src/scriptaddon/scriptenv.cpp)
+    src/scriptaddon/scriptenv.cpp
+    src/scriptaddon/scriptany.cpp
+    src/scriptaddon/scriptany.h)
 
 # localization support
 file(
@@ -464,10 +537,13 @@ set(PROJECT_SOURCES
     src/utilities.h
     src/dbghelper.h
     src/define.h
+    src/predefgen.h
     ${QCONSOLEWIDGET_SRC}
     ${WIDGET_FRAME_SRC}
     ${RIBBON_SRC}
+    ${STRUCT_LIB_SRC}
     ${CLASS_SRC}
+    ${AS_DEBUGGER_SRC}
     ${INTERNAL_PLG_SRC}
     ${MODEL_SRC}
     ${DIALOG_SRC}
@@ -490,8 +566,12 @@ add_custom_target(
 if(${QT_VERSION_MAJOR} GREATER_EQUAL 6)
     if(WIN32)
         set(app_icon_resource_windows "${CMAKE_CURRENT_SOURCE_DIR}/favicon.rc")
+        find_package(Qt6 REQUIRED COMPONENTS Core)
+
         qt_add_executable(WingHexExplorer2 MANUAL_FINALIZATION
                           ${PROJECT_SOURCES} ${app_icon_resource_windows})
+
+        target_link_libraries(WingHexExplorer2 PRIVATE Qt6::Core)
     else()
         qt_add_executable(WingHexExplorer2 MANUAL_FINALIZATION
                           ${PROJECT_SOURCES})
@@ -521,6 +601,7 @@ target_link_libraries(
             QHexView
             WingCodeEdit
             angelscript
+            fmt::fmt
             antlr4_static
             qtadvanceddocking-qt${QT_VERSION_MAJOR})
 
@@ -559,6 +640,8 @@ if(QT_VERSION_MAJOR EQUAL 6)
     qt_finalize_executable(WingHexExplorer2)
 endif()
 
+add_dependencies(WingHexExplorer2 post_build_tasks build-time-make-directory)
+
 if(${QT_VERSION_MAJOR} EQUAL 6)
     if(Qt6Widgets_VERSION VERSION_GREATER_EQUAL 6.5.0)
         install(
@@ -576,3 +659,116 @@ if(${QT_VERSION_MAJOR} EQUAL 6)
     endif()
 endif()
 add_subdirectory(WingPlugin)
+
+include(CheckIPOSupported)
+check_ipo_supported(RESULT _ipo_supported OUTPUT _ipo_error)
+if(_ipo_supported)
+    set_property(TARGET WingHexExplorer2
+                 PROPERTY INTERPROCEDURAL_OPTIMIZATION_DEBUG OFF)
+    set_property(TARGET WingHexExplorer2
+                 PROPERTY INTERPROCEDURAL_OPTIMIZATION_RELEASE ON)
+endif()
+
+target_compile_options(
+    WingHexExplorer2
+    PRIVATE
+        $<$<AND:$<CONFIG:Release>,$<CXX_COMPILER_ID:GNU>>:-ffunction-sections
+        -fdata-sections
+        -fvisibility=hidden
+        -fvisibility-inlines-hidden>
+        $<$<AND:$<CONFIG:Release>,$<CXX_COMPILER_ID:Clang>>:-ffunction-sections
+        -fdata-sections
+        -fvisibility=hidden
+        -fvisibility-inlines-hidden>)
+
+target_link_options(
+    WingHexExplorer2
+    PRIVATE
+    $<$<AND:$<CONFIG:Release>,$<CXX_COMPILER_ID:GNU>>:-Wl,--gc-sections>
+    $<$<AND:$<CONFIG:Release>,$<CXX_COMPILER_ID:Clang>>:-Wl,--gc-sections>
+    $<$<AND:$<CONFIG:Release>,$<CXX_COMPILER_ID:MSVC>>:/OPT:REF
+    /OPT:ICF>)
+
+if(ANGEL_LSP)
+    set(NODE_SUBDIR "${CMAKE_SOURCE_DIR}/3rdparty/angel-lsp/server")
+    set(BUILD_BIN_DIR "${CMAKE_BINARY_DIR}/lsp")
+    set(BUILD_BIN_BUILD_DIR "${CMAKE_BINARY_DIR}/lsp-build")
+
+    if(WIN32)
+        set(OUT_NAME "angelscript-ls.exe")
+    else()
+        set(OUT_NAME "angelscript-ls")
+    endif()
+
+    set(SRC_JS "${NODE_SUBDIR}/src/server.ts")
+    set(DIST_JS "${BUILD_BIN_BUILD_DIR}/dist/angelscript-language-server.js")
+    set(OUT_BIN "${BUILD_BIN_DIR}/${OUT_NAME}")
+
+    find_program(NODE_EXE NAMES node)
+    find_program(NPM_EXE NAMES npm)
+    find_program(NPX_EXE NAMES npx)
+
+    if(NOT NODE_EXE)
+        message(FATAL_ERROR "Node.js not found. Install Node >= 18.")
+    endif()
+    if(NOT NPM_EXE)
+        message(FATAL_ERROR "npm not found. Install npm.")
+    endif()
+    if(NOT NPX_EXE)
+        message(FATAL_ERROR "npx not found. Install npx.")
+    endif()
+
+    message(STATUS "Found node: ${NODE_EXE}")
+    message(STATUS "Found npm:  ${NPM_EXE}")
+
+    if(WIN32)
+        set(PKG_TARGET "node18-win-x64")
+    elseif(APPLE)
+        set(PKG_TARGET "node18-macos-x64")
+    else()
+        set(PKG_TARGET "node18-linux-x64")
+    endif()
+
+    set(ESBUILD_CMD
+        ${NPX_EXE}
+        esbuild
+        "${SRC_JS}"
+        --bundle
+        --platform=node
+        --target=node18
+        "--outfile=${DIST_JS}"
+        --minify)
+
+    set(PKG_CMD
+        ${NPX_EXE}
+        pkg
+        "${DIST_JS}"
+        --targets
+        ${PKG_TARGET}
+        --output
+        "${OUT_BIN}")
+
+    add_custom_command(
+        OUTPUT ${DIST_JS}
+        WORKING_DIRECTORY ${NODE_SUBDIR}
+        COMMAND ${CMAKE_COMMAND} -E echo "[1] npm ci (local deps)"
+        COMMAND ${NPM_EXE} ci --silent
+        COMMAND ${CMAKE_COMMAND} -E echo "[2] building with esbuild"
+        COMMAND ${NPX_EXE} tsc
+        COMMAND ${ESBUILD_CMD}
+        COMMENT "Building JS bundle with esbuild -> ${DIST_JS}"
+        VERBATIM)
+
+    add_custom_command(
+        OUTPUT ${OUT_BIN}
+        DEPENDS ${DIST_JS}
+        WORKING_DIRECTORY ${NODE_SUBDIR}
+        COMMAND ${CMAKE_COMMAND} -E make_directory ${BUILD_BIN_DIR}
+        COMMAND ${CMAKE_COMMAND} -E make_directory ${BUILD_BIN_BUILD_DIR}
+        COMMAND ${CMAKE_COMMAND} -E echo "[3] packaging with pkg/npm exec/npx"
+        COMMAND ${PKG_CMD}
+        COMMENT "Packaging with pkg"
+        VERBATIM)
+    add_custom_target(build_angel_lsp ALL DEPENDS ${OUT_BIN})
+    add_dependencies(WingHexExplorer2 build_angel_lsp)
+endif()

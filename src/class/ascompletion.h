@@ -19,9 +19,9 @@
 #define _AS_COMPLETION_H_
 
 #include "WingCodeEdit/wingcompleter.h"
-#include "class/asdatabase.h"
-
-class AsPreprocesser;
+#include "class/codeinfotip.h"
+#include "class/lspeditorinterface.h"
+#include "class/resettabletimer.h"
 
 class AsCompletion : public WingCompleter {
     Q_OBJECT
@@ -36,51 +36,33 @@ public:
 
     void clearFunctionTip();
 
+private:
+    QList<CodeInfoTip> parseCompletion(const QJsonValue &v);
+
 protected:
     virtual bool processTrigger(const QString &trigger,
                                 const QString &content) override;
 
-    virtual QList<CodeInfoTip> parseDocument();
-
     virtual QList<CodeInfoTip> parseMarcos();
 
-    QList<CodeInfoTip> parseScriptData(qsizetype offset,
-                                       const QByteArray &code);
-
-signals:
-    void onFunctionTip(const QString &content);
+    virtual LspEditorInterace *getEditor();
 
     // QObject interface
 public:
     virtual bool eventFilter(QObject *watched, QEvent *event) override;
 
-private:
-    void applyEmptyNsNode(QList<CodeInfoTip> &nodes,
-                          const QList<CodeInfoTip> &docNodes);
-    void applyClassNodes(QList<CodeInfoTip> &nodes);
+    QList<CodeInfoTip> keywordNode() const;
+
+private slots:
+    void onCodeComplete();
+    void onActivatedCodeComplete(const QModelIndex &index);
 
 private:
-    static int includeCallBack(const QString &include, bool quotedInclude,
-                               const QString &from, AsPreprocesser *builder,
-                               void *userParam);
+    QList<CodeInfoTip> _keywordNode;
 
-private:
-    struct CompleteDB {
-        QList<CodeInfoTip> data;
-        QByteArray md5;
-        uint time = 0;
-    };
-
-    QHash<QString, CompleteDB> comdb;
-
-    void pushCompleteDBData(const QString &fileName,
-                            const QList<CodeInfoTip> &data);
-    std::optional<CompleteDB> getCompleteDBData(const QString &fileName);
-    void remoteCompleteDBData(const QString &fileName);
-    void clearCompleteDBUnused();
-
-private:
-    ASDataBase parser;
+protected:
+    ResettableTimer *_timer;
+    bool _ok = true;
 };
 
 #endif // _CPP_COMPLETION_H_

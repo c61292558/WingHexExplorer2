@@ -22,7 +22,6 @@
 #include "dialog/splashdialog.h"
 #include "framelessmainwindow.h"
 
-#include <QBuffer>
 #include <QFutureWatcher>
 #include <QListView>
 #include <QMainWindow>
@@ -36,7 +35,6 @@
 #include <QTreeView>
 #include <QUndoView>
 #include <QtConcurrent/QtConcurrentRun>
-#include <QtEndian>
 
 #include "QWingRibbon/ribbon.h"
 #include "QWingRibbon/ribbonbuttongroup.h"
@@ -46,6 +44,7 @@
 #include "WingPlugin/iwingplugin.h"
 #include "class/consolehighlighanim.h"
 #include "class/recentfilemanager.h"
+#include "control/asidbtreeview.h"
 #include "control/editorview.h"
 #include "control/qtableviewext.h"
 #include "control/scriptingconsole.h"
@@ -58,6 +57,7 @@
 #include "utilities.h"
 
 class PluginSystem;
+class EventFilter;
 
 class MainWindow : public FramelessMainWindow {
     Q_OBJECT
@@ -122,7 +122,9 @@ private:
     ads::CDockAreaWidget *
     buildUpScriptBgOutputDock(ads::CDockManager *dock, ads::DockWidgetArea area,
                               ads::CDockAreaWidget *areaw = nullptr);
-
+    ads::CDockAreaWidget *
+    buildUpScriptObjDock(ads::CDockManager *dock, ads::DockWidgetArea area,
+                         ads::CDockAreaWidget *areaw = nullptr);
     ads::CDockAreaWidget *
     buildUpUndoStackDock(ads::CDockManager *dock, ads::DockWidgetArea area,
                          ads::CDockAreaWidget *areaw = nullptr);
@@ -223,12 +225,21 @@ public:
                        QString *ws = nullptr);
     ErrFile closeEditor(EditorView *editor, bool force);
 
+    void openScriptFile(const QString &filename, SplashDialog *splash);
+
     EditorView *currentEditor();
     void adjustEditorFocus(EditorView *closedEditor);
 
     QString getWorkSpaceFileName(const QString &curFile);
 
     void saveTableContent(QAbstractItemModel *model);
+
+private:
+    void updateNumberTable();
+    void updateStringDec(const QByteArrayList &content);
+    void updateUI();
+
+    void createScriptDialog(SplashDialog *d);
 
 private:
     IWingPlugin::FileType getEditorViewFileType(EditorView *view);
@@ -266,6 +277,8 @@ private:
     inline ads::CDockAreaWidget *editorViewArea() const;
 
     void onOutputBgScriptOutput(const ScriptMachine::MessageInfo &message);
+
+    void restoreLayout(const QByteArray &layout);
 
 protected:
     virtual void closeEvent(QCloseEvent *event) override;
@@ -391,49 +404,8 @@ private:
     }
 
     template <typename T>
-    inline T qToBigEndian(T source) {
-        return ::qToBigEndian(source);
-    }
-
-    template <typename T>
-    inline T qToLittleEndian(T source) {
-        return ::qToLittleEndian(source);
-    }
-
-    inline QByteArray qToBigEndian(QByteArray source) {
-        QByteArray result;
-        QBuffer buffer(&result);
-        buffer.open(QIODevice::WriteOnly);
-
-        QDataStream stream(&buffer);
-        stream.setByteOrder(QDataStream::BigEndian);
-        stream.writeRawData(source.constData(), source.size());
-        return result;
-    }
-
-    inline QByteArray qToLittleEndian(QByteArray source) {
-        QByteArray result;
-        QBuffer buffer(&result);
-        buffer.open(QIODevice::WriteOnly);
-
-        QDataStream stream(&buffer);
-        stream.setByteOrder(QDataStream::LittleEndian);
-        stream.writeRawData(source.constData(), source.size());
-        return result;
-    }
-
-    template <typename T>
     inline T processEndian(T source) {
-        if (Utilities::checkIsLittleEndian()) {
-            if (!m_islittle) {
-                return qToBigEndian(source);
-            }
-        } else {
-            if (m_islittle) {
-                return qToLittleEndian(source);
-            }
-        }
-        return source;
+        return Utilities::processEndian(source, m_islittle);
     }
 
     /* =============== some templates for async execution ===============*/
@@ -472,8 +444,9 @@ signals:
 private:
     Ribbon *m_ribbon = nullptr;
     ads::CDockManager *m_dock = nullptr;
-    ScrollableLabel *_status = nullptr;
+    QLabel *_status = nullptr;
 
+    // for show text
     QString m_encoding;
 
     ScriptingDialog *m_scriptDialog = nullptr;
@@ -484,27 +457,26 @@ private:
 
     bool m_isfinding = false;
     ads::CDockWidget *m_find = nullptr;
+    ads::CDockWidget *m_hashtable = nullptr;
     QMenu *m_menuFind = nullptr;
     QHash<QString, QAction *> m_findEncoding;
+
     QTableViewExt *m_findresult = nullptr;
-    FindResultModel *_findEmptyResult = nullptr;
+    FindResultModel *_findResultModel = nullptr;
+    CheckSumModel *_hashModel = nullptr;
+    BookMarksModel *_bookMarkModel = nullptr;
+    MetaDataModel *_metadataModel = nullptr;
+
+    EventFilter *m_lazyVisibleFilter = nullptr;
 
     QTableViewExt *m_numshowtable = nullptr;
     NumShowModel *_numsitem = nullptr;
 
-    QTableViewExt *m_hashtable = nullptr;
-    CheckSumModel *_hashModel = nullptr;
-
     QTextBrowser *m_logbrowser = nullptr;
     QTextBrowser *m_txtDecode = nullptr;
 
-    QTableViewExt *m_bookmarks = nullptr;
-    BookMarksModel *_bookMarkEmpty = nullptr;
-
-    QTableViewExt *m_metadatas = nullptr;
-    MetaDataModel *_metadataEmpty = nullptr;
-
     QUndoView *_undoView = nullptr;
+    asIDBTreeView *_scriptObjView = nullptr;
 
     QMap<ToolButtonIndex, QToolButton *> m_toolBtneditors;
 
@@ -528,7 +500,7 @@ private:
     EditorView *m_curEditor = nullptr;
 
     SettingDialog *m_setdialog = nullptr;
-    SettingDialog *m_plgsetdlg = nullptr;
+    SettingDialog *m_scriptsetdlg = nullptr;
     RecentFileManager *m_recentmanager = nullptr;
     QMenu *m_recentMenu = nullptr;
 

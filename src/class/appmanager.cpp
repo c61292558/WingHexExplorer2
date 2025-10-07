@@ -22,7 +22,6 @@
 #include "QConsoleWidget/QConsoleWidget.h"
 #include "QConsoleWidget/commandhistorymanager.h"
 #include "angelscript.h"
-#include "clangformatmanager.h"
 #include "control/toast.h"
 #include "crashhandler.h"
 #include "dbghelper.h"
@@ -91,17 +90,15 @@ AppManager::AppManager(int &argc, char *argv[])
 
     auto dontSplash = set.dontUseSplash();
 
-    SplashDialog *splash = nullptr;
     if (!dontSplash) {
         splash = new SplashDialog;
-        splash->setInfoText(tr("SetupClang"));
-        ClangFormatManager::instance();
     }
 
     auto cmdlist = CommandHistoryManager::load();
     auto &his = QConsoleWidget::history();
     for (auto &cmd : cmdlist) {
-        his.add(cmd);
+        static QRegularExpression ex(QStringLiteral("[\\r\\n]"));
+        his.add(cmd.remove(ex));
     }
 
     _timer.start();
@@ -138,13 +135,14 @@ AppManager::AppManager(int &argc, char *argv[])
     connect(_w, &MainWindow::closed, this,
             []() { AppManager::instance()->exit(); });
 
-    if (splash)
+    if (splash) {
         splash->close();
+        splash = nullptr;
+    }
 }
 
 AppManager::~AppManager() {
-    ClangFormatManager::instance().save();
-    ScriptMachine::instance().deleteLater();
+    ScriptMachine::instance().destoryMachine();
     InspectQtLogHelper::instance().destory();
     CommandHistoryManager::save(QConsoleWidget::history().strings_);
 
@@ -164,7 +162,16 @@ void AppManager::openFile(const QString &file, bool autoDetect) {
 
     ErrFile ret = ErrFile::Error;
     if (autoDetect) {
-        ret = _w->openWorkSpace(file, &editor);
+        QFileInfo finfo(file);
+        if (Utilities::isTextFile(finfo)) {
+            auto suffix = finfo.suffix();
+            if (suffix.compare(QStringLiteral("wingpro")) == 0) {
+                ret = _w->openWorkSpace(file, &editor);
+            } else if (suffix.compare(QStringLiteral("as")) == 0) {
+                _w->openScriptFile(file, splash);
+                ret = ErrFile::Success;
+            }
+        }
     }
     if (ret == ErrFile::Error) {
         ret = _w->openFile(file, &editor);

@@ -38,6 +38,18 @@ private:
 
     void createObjNodes(const QList<CodeInfoTip> &nodes,
                         QTreeWidgetItem *parent);
+
+    QByteArray getFnRealName(asIScriptFunction *fn);
+
+private:
+    void addGlobalFunctionCompletion(asIScriptEngine *engine,
+                                     QHash<QString, QList<CodeInfoTip>> &c);
+
+    void addEnumCompletion(asIScriptEngine *engine,
+                           QHash<QString, QList<CodeInfoTip>> &c);
+
+    void addClassCompletion(asIScriptEngine *engine,
+                            QHash<QString, QList<CodeInfoTip>> &c);
 };
 
 #endif // ASOBJTREEWIDGET_H

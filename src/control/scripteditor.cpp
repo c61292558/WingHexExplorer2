@@ -26,14 +26,16 @@
 #include <QAction>
 #include <QFile>
 #include <QFileInfo>
+#include <QJsonArray>
+#include <QJsonObject>
 #include <QPixmap>
 
 #include <KSyntaxHighlighting/Definition>
 #include <KSyntaxHighlighting/Repository>
 #include <KSyntaxHighlighting/Theme>
 
+#include "class/angellsp.h"
 #include "class/ascompletion.h"
-#include "class/clangformatmanager.h"
 
 ScriptEditor::ScriptEditor(QWidget *parent)
     : ads::CDockWidget(nullptr, QString(), parent) {
@@ -47,10 +49,17 @@ ScriptEditor::ScriptEditor(QWidget *parent)
     m_editor = new CodeEdit(this);
     m_editor->setSyntax(
         m_editor->syntaxRepo().definitionForName("AngelScript"));
+    connect(m_editor, &CodeEdit::textChanged, this, [this]() {
+        if (!_ok) {
+            _lastSent = false;
+            return;
+        }
+        sendDocChange();
+    });
 
     auto cm = new AsCompletion(m_editor);
-    connect(cm, &AsCompletion::onFunctionTip, this,
-            &ScriptEditor::onFunctionTip);
+    cm->setParent(m_editor);
+    cm->setEnabled(AngelLsp::instance().isActive());
 
     connect(m_editor, &CodeEdit::symbolMarkLineMarginClicked, this,
             &ScriptEditor::onToggleMark);
@@ -61,42 +70,64 @@ ScriptEditor::ScriptEditor(QWidget *parent)
             &ScriptEditor::need2Reload);
 
     this->setWidget(m_editor);
+
+    _timer = new ResettableTimer(this);
+    connect(_timer, &ResettableTimer::timeoutTriggered, this,
+            &ScriptEditor::onSendFullTextChangeCompleted);
 }
 
 ScriptEditor::~ScriptEditor() {
-    auto e = editor();
-    e->document()->disconnect();
-    e->disconnect();
+    auto fileName = this->fileName();
+    if (!fileName.isEmpty()) {
+        AngelLsp::instance().closeDocument(Utilities::getUrlString(fileName));
+    }
 }
 
-QString ScriptEditor::fileName() const { return m_fileName; }
+QString ScriptEditor::fileName() const { return m_editor->windowFilePath(); }
+
+QString ScriptEditor::lspFileNameURL() const {
+    return Utilities::getUrlString(fileName());
+}
 
 bool ScriptEditor::openFile(const QString &filename) {
+    auto &lsp = AngelLsp::instance();
+
     QFile f(filename);
     if (!f.open(QFile::ReadOnly | QFile::Text)) {
         return false;
     }
-    m_editor->setPlainText(QString::fromUtf8(f.readAll()));
+
+    auto txt = QString::fromUtf8(f.readAll());
+    m_editor->blockSignals(true); // don't triiger textChanged()
+    m_editor->setPlainText(txt);
+    m_editor->blockSignals(false);
     f.close();
 
-    if (!m_fileName.isEmpty()) {
-        _watcher.removePath(m_fileName);
+    auto oldFileName = this->fileName();
+
+    if (!oldFileName.isEmpty()) {
+        _watcher.removePath(oldFileName);
     }
 
-    m_fileName = filename;
-    _watcher.addPath(m_fileName);
+    m_editor->setWindowFilePath(filename);
+    lsp.openDocument(lspFileNameURL(), 0, txt);
+    _watcher.addPath(filename);
 
     processTitle();
     return true;
 }
 
 bool ScriptEditor::save(const QString &path) {
-    if (!m_fileName.isEmpty()) {
-        _watcher.removePath(m_fileName);
+    auto &lsp = AngelLsp::instance();
+
+    auto oldFileName = fileName();
+    if (!oldFileName.isEmpty()) {
+        _watcher.removePath(oldFileName);
+        lsp.closeDocument(lspFileNameURL());
     }
     QScopeGuard guard([this, path]() {
         if (path.isEmpty()) {
-            _watcher.addPath(m_fileName);
+            _watcher.addPath(fileName());
         } else {
             _watcher.addPath(path);
         }
@@ -106,13 +137,8 @@ bool ScriptEditor::save(const QString &path) {
     auto needAdjustFile = !QFile::exists(path);
 #endif
 
-    auto &clang = ClangFormatManager::instance();
-    if (clang.exists() && clang.autoFormat()) {
-        formatCode();
-    }
-
     if (path.isEmpty()) {
-        QFile f(m_fileName);
+        QFile f(oldFileName);
         if (!f.open(QFile::WriteOnly | QFile::Text)) {
             return false;
         }
@@ -145,12 +171,19 @@ bool ScriptEditor::save(const QString &path) {
     }
 #endif
 
-    m_fileName = path;
+    m_editor->setWindowFilePath(path);
     m_editor->document()->setModified(false);
     return true;
 }
 
-bool ScriptEditor::reload() { return openFile(m_fileName); }
+bool ScriptEditor::reload() {
+    auto &lsp = AngelLsp::instance();
+    auto fileName = this->fileName();
+    if (lsp.isActive()) {
+        lsp.closeDocument(Utilities::getUrlString(fileName));
+    }
+    return openFile(fileName);
+}
 
 void ScriptEditor::find() { m_editor->showSearchReplaceBar(true, false); }
 
@@ -158,13 +191,40 @@ void ScriptEditor::replace() { m_editor->showSearchReplaceBar(true, true); }
 
 void ScriptEditor::gotoLine() { m_editor->showGotoBar(true); }
 
+void ScriptEditor::onReconnectLsp() {
+    auto &lsp = AngelLsp::instance();
+    lsp.openDocument(lspFileNameURL(), 0, m_editor->toPlainText());
+    version = 1;
+}
+
+void ScriptEditor::setCompleterEnabled(bool b) {
+    m_editor->completer()->setEnabled(b);
+}
+
+bool ScriptEditor::increaseVersion() {
+    version++;
+    if (version == 0) { // test overflow
+        version = 1;
+        return true;
+    }
+    return false;
+}
+
+void ScriptEditor::onSendFullTextChangeCompleted() {
+    if (!_lastSent) {
+        sendDocChange();
+        _lastSent = true;
+    }
+    _ok = true;
+}
+
 void ScriptEditor::setReadOnly(bool b) {
     m_editor->setReadOnly(b);
     this->tabWidget()->setIcon(b ? ICONRES("lockon") : QIcon());
 }
 
 void ScriptEditor::processTitle() {
-    QString filename = QFileInfo(m_fileName).fileName();
+    QString filename = QFileInfo(fileName()).fileName();
     if (m_editor->document()->isModified()) {
         setWindowTitle(filename.prepend(QStringLiteral("* ")));
     } else {
@@ -172,36 +232,96 @@ void ScriptEditor::processTitle() {
     }
 }
 
+void ScriptEditor::sendDocChange() {
+    auto &lsp = AngelLsp::instance();
+    if (lsp.isActive()) {
+        auto url = lspFileNameURL();
+        auto txt = m_editor->toPlainText();
+        // test overflow
+        if (increaseVersion()) {
+            lsp.closeDocument(url);
+            lsp.openDocument(url, 0, txt);
+        } else {
+            lsp.changeDocument(url, getVersion(), txt);
+        }
+
+        _ok = false;
+        _timer->reset(300);
+    }
+}
+
+bool ScriptEditor::isContentLspUpdated() const { return _ok; }
+
+LspEditorInterace::CursorPos ScriptEditor::currentPosition() const {
+    auto tc = m_editor->textCursor();
+    LspEditorInterace::CursorPos pos;
+    pos.blockNumber = tc.blockNumber();
+    pos.positionInBlock = tc.positionInBlock();
+    return pos;
+}
+
+void ScriptEditor::showFunctionTip(
+    const QList<WingSignatureTooltip::Signature> &sigs) {
+    m_editor->showHelpTooltip(sigs);
+}
+
+void ScriptEditor::clearFunctionTip() { m_editor->hideHelpTooltip(); }
+
+quint64 ScriptEditor::getVersion() const { return version; }
+
 CodeEdit *ScriptEditor::editor() const { return m_editor; }
 
 bool ScriptEditor::formatCode() {
-    bool ok;
-    auto e = editor();
-    auto orign = e->toPlainText();
-    auto fmtcodes = ClangFormatManager::instance().formatCode(orign, ok);
-    if (ok && fmtcodes != orign) {
-        auto cursor = e->textCursor();
-        auto row = cursor.blockNumber();
-        auto col = cursor.columnNumber();
-
-        cursor.beginEditBlock();
-        cursor.select(QTextCursor::Document);
-        cursor.removeSelectedText();
-        cursor.insertText(fmtcodes);
-        cursor.endEditBlock();
-
-        cursor = e->textCursor();
-        cursor.setPosition(0);
-        cursor.movePosition(QTextCursor::Down, QTextCursor::MoveAnchor, row);
-
-        auto tmpcur = cursor;
-        tmpcur.movePosition(QTextCursor::EndOfLine, QTextCursor::MoveAnchor);
-        auto len = tmpcur.position() - cursor.position();
-        cursor.movePosition(QTextCursor::Right, QTextCursor::MoveAnchor,
-                            qMin(len, col));
-        e->setTextCursor(cursor);
-
-        return true;
+    auto &lsp = AngelLsp::instance();
+    if (!lsp.isActive()) {
+        return false;
     }
-    return false;
+
+    auto r = lsp.requestFormat(lspFileNameURL());
+
+    struct TextEdit {
+        qint64 start = -1;
+        qint64 end = -1;
+        QString newText;
+
+        bool isValid() const { return start >= 0 && end >= start; }
+    };
+
+    QTextDocument *document = m_editor->document();
+    QVector<TextEdit> textEdits;
+
+    auto calculatePosition = [](QTextDocument *document,
+                                const LSP::Location &loc) -> qint64 {
+        QTextBlock block = document->findBlockByLineNumber(loc.line);
+        if (!block.isValid()) {
+            return -1;
+        }
+        return block.position() + qMin(loc.character, block.length() - 1);
+    };
+
+    for (const QJsonValue &v : r.toArray()) {
+        auto range = AngelLsp::readLSPDocRange(v.toObject());
+        TextEdit edit;
+        edit.start = calculatePosition(document, range.start);
+        edit.end = calculatePosition(document, range.end);
+        edit.newText = v["newText"].toString();
+        if (edit.isValid()) {
+            textEdits.append(edit);
+        }
+    }
+
+    std::sort(
+        textEdits.begin(), textEdits.end(),
+        [](const TextEdit &a, const TextEdit &b) { return a.start > b.start; });
+
+    QTextCursor cursor(document);
+    cursor.beginEditBlock();
+    for (const TextEdit &edit : textEdits) {
+        cursor.setPosition(edit.start);
+        cursor.setPosition(edit.end, QTextCursor::KeepAnchor);
+        cursor.insertText(edit.newText);
+    }
+    cursor.endEditBlock();
+
+    return true;
 }

@@ -18,9 +18,9 @@
 #ifndef SCRIPTINGDIALOG_H
 #define SCRIPTINGDIALOG_H
 
+#include "control/asidbtreeview.h"
 #include "control/asobjtreewidget.h"
 #include "control/scriptingconsole.h"
-#include "control/scrollablelabel.h"
 #include "dialog/settingdialog.h"
 #include "framelessmainwindow.h"
 
@@ -28,10 +28,11 @@
 #include "QWingRibbon/ribbonbuttongroup.h"
 #include "Qt-Advanced-Docking-System/src/DockManager.h"
 #include "Qt-Advanced-Docking-System/src/DockWidget.h"
+#include "WingCodeEdit/wingsquiggleinfomodel.h"
 #include "class/recentfilemanager.h"
 #include "control/scripteditor.h"
+#include "model/asidbwatchmodel.h"
 #include "model/dbgcallstackmodel.h"
-#include "model/dbgvarshowmodel.h"
 #include "utilities.h"
 
 #include <QKeySequence>
@@ -63,19 +64,17 @@ private:
     };
 
 public:
-    explicit ScriptingDialog(QWidget *parent = nullptr);
+    explicit ScriptingDialog(SettingDialog *setdlg, QWidget *parent = nullptr);
     virtual ~ScriptingDialog();
 
     void initConsole();
 
     bool about2Close();
 
-    void saveDockLayout();
-
-    SettingDialog *settingDialog() const;
-
 private:
     void buildUpRibbonBar();
+    void saveDockLayout();
+
     RibbonTabContent *buildFilePage(RibbonTabContent *tab);
     RibbonTabContent *buildEditPage(RibbonTabContent *tab);
     RibbonTabContent *buildViewPage(RibbonTabContent *tab);
@@ -87,6 +86,9 @@ private:
     buildUpVarShowDock(ads::CDockManager *dock, ads::DockWidgetArea area,
                        ads::CDockAreaWidget *areaw = nullptr);
     ads::CDockAreaWidget *
+    buildUpVarWatchDock(ads::CDockManager *dock, ads::DockWidgetArea area,
+                        ads::CDockAreaWidget *areaw = nullptr);
+    ads::CDockAreaWidget *
     buildUpOutputShowDock(ads::CDockManager *dock, ads::DockWidgetArea area,
                           ads::CDockAreaWidget *areaw = nullptr);
     ads::CDockAreaWidget *
@@ -95,6 +97,10 @@ private:
     ads::CDockAreaWidget *
     buildSymbolShowDock(ads::CDockManager *dock, ads::DockWidgetArea area,
                         ads::CDockAreaWidget *areaw = nullptr);
+
+    ads::CDockAreaWidget *
+    buildDiagnosisDock(ads::CDockManager *dock, ads::DockWidgetArea area,
+                       ads::CDockAreaWidget *areaw = nullptr);
 
     void buildUpDockSystem(QWidget *container);
 
@@ -210,13 +216,9 @@ private:
 
     bool isCurrentDebugging() const;
 
-    ScriptEditor *openFile(const QString &filename);
+    void runDbgCommand(asIDBAction action);
 
-    void runDbgCommand(asDebugger::DebugAction action);
-
-    void buildUpSettingDialog();
-
-    void startDebugScript(ScriptEditor *editor);
+    void startDebugScript(const QString &fileName);
 
     void addBreakPoint(ScriptEditor *editor, int line);
     void removeBreakPoint(ScriptEditor *editor, int line);
@@ -225,6 +227,11 @@ private:
     void updateCursorPosition();
 
     void reloadEditor(ScriptEditor *editor);
+
+    void updateUI();
+
+public:
+    ScriptEditor *openFile(const QString &filename);
 
 private slots:
     void on_newfile();
@@ -272,6 +279,11 @@ protected:
     void closeEvent(QCloseEvent *event) override;
 
 private:
+    ScriptEditor *createFakeEditor(const QString &fileName,
+                                   const QString &text);
+    void destoryFakeEditor();
+
+private:
     ads::CDockManager *m_dock = nullptr;
     ads::CDockAreaWidget *m_editorViewArea = nullptr;
     QStatusBar *m_status = nullptr;
@@ -279,7 +291,12 @@ private:
     QByteArray _defaultLayout;
     QByteArray _savedLayout;
 
+    ads::CDockWidget *m_outConsole = nullptr;
+    ads::CDockWidget *m_dbgVarView = nullptr;
+    ads::CDockWidget *m_dbgWatchView = nullptr;
+
     ScriptEditor *m_curEditor = nullptr;
+    WingSquiggleInfoModel *_squinfoModel = nullptr;
     QList<QWidget *> m_editStateWidgets;
 
     QMap<ToolButtonIndex, QToolButton *> m_Tbtneditors;
@@ -296,16 +313,19 @@ private:
     QList<ScriptEditor *> m_views;
     QString m_lastusedpath;
 
+    QHash<QString, AsPreprocesser::Result> _curDbgData;
+    QVector<ScriptEditor *> _reditors;
+
     // widgets for debugging
     ScriptingConsole *m_consoleout = nullptr;
-    DbgVarShowModel *m_varshow = nullptr;
-    DbgVarShowModel *m_gvarshow = nullptr;
+    asIDBTreeView *m_varshow = nullptr;
+    asIDBTreeView *m_gvarshow = nullptr;
+    AsIDBWatchModel *m_watchModel = nullptr;
     DbgCallStackModel *m_callstack = nullptr;
     ASObjTreeWidget *m_sym = nullptr;
+    ScriptEditor *_fakeEditor = nullptr;
 
-    ScriptEditor *_DebugingEditor;
-
-    ScrollableLabel *_status = nullptr;
+    QLabel *_status = nullptr;
 };
 
 #endif // SCRIPTINGDIALOG_H

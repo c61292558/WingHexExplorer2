@@ -32,6 +32,7 @@
 #include "dialog/colorpickerdialog.h"
 #include "dialog/framelessdialogbase.h"
 #include "dialog/mainwindow.h"
+#include "predefgen.h"
 
 #include <QDir>
 #include <QFileInfoList>
@@ -47,15 +48,12 @@
 PluginSystem::PluginSystem(QObject *parent) : QObject(parent) {
     auto mobj = PluginSystem::metaObject();
     auto total = mobj->methodCount();
-    for (int i = 0; i < total; ++i) {
+
+    // all public slots
+    for (int i = mobj->methodOffset(); i < total; ++i) {
         auto m = mobj->method(i);
-        // all public slots
         if (m.methodType() == QMetaMethod::Slot &&
             m.access() == QMetaMethod::Public) {
-            if (qstrcmp(m.tag(), "WING_API")) {
-                continue;
-            }
-
             WingHex::FunctionSig msig;
             msig.fnName = m.name();
 
@@ -701,7 +699,7 @@ bool PluginSystem::invokeServiceImpl(const QObject *sender, const QString &puid,
 
     if (ret != QMetaMethodInvoker::InvokeFailReason::None) {
         qCritical("[PluginSystem::invokeServiceImpl] MetaCall failed: %s (%d)",
-                  cstr(ret), ret);
+                  cstr(ret), int(ret));
     }
 
     return ret == QMetaMethodInvoker::InvokeFailReason::None;
@@ -2750,6 +2748,23 @@ void PluginSystem::doneRegisterScriptObj() {
     // ok, then, we will register all script objects
     auto api =
         QScopedPointer<WingAngel>(new WingAngel(_angelplg, _scriptMarcos));
+
+    // don't register evalutors for internal types
+    auto &m = ScriptMachine::instance();
+    auto engine = m.engine();
+    auto total = engine->GetObjectTypeCount();
+    QList<int> excludeTypeId;
+    excludeTypeId.reserve(total);
+    for (asUINT i = 0; i < total; ++i) {
+        auto obj = engine->GetObjectTypeByIndex(i);
+        auto typeId = obj->GetTypeId();
+        typeId &= asTYPEID_MASK_OBJECT | asTYPEID_MASK_SEQNBR;
+        if (typeId) {
+            excludeTypeId.append(typeId);
+        }
+    }
+    api->setExcludeEvalIDs(excludeTypeId);
+
     auto ptr = api.data();
     if (_manager) {
         ptr->setCurrentPluginSession(_manInfo->id.toUtf8());
@@ -2767,6 +2782,13 @@ void PluginSystem::doneRegisterScriptObj() {
         ptr->setCurrentPluginSession(puid.toUtf8());
         p->onRegisterScriptObj(ptr);
     }
+
+    auto evals = api->customEvals();
+    m.setCustomEvals(evals);
+
+    ptr->setCurrentPluginSession({});
+    generateScriptPredefined(ScriptMachine::instance().engine(),
+                             Utilities::getASPredefPath());
 }
 
 const std::optional<PluginInfo> &PluginSystem::monitorManagerInfo() const {
@@ -3006,8 +3028,7 @@ int PluginSystem::openWorkSpace(const QObject *sender,
     }
     auto ret = _win->openWorkSpace(filename, &view);
     if (view) {
-        if (ret == ErrFile::AlreadyOpened &&
-            checkPluginHasAlreadyOpened(plg, view)) {
+        if (ret == ErrFile::AlreadyOpened) {
             return ErrFile::AlreadyOpened;
         }
         auto id = assginHandleForOpenPluginView(plg, view);
@@ -3110,8 +3131,7 @@ int PluginSystem::openExtFile(const QObject *sender, const QString &ext,
     }
     auto ret = _win->openExtFile(ext, file, &view);
     if (view) {
-        if (ret == ErrFile::AlreadyOpened &&
-            checkPluginHasAlreadyOpened(plg, view)) {
+        if (ret == ErrFile::AlreadyOpened) {
             return ErrFile::AlreadyOpened;
         }
         auto id = assginHandleForOpenPluginView(plg, view);
@@ -3147,8 +3167,7 @@ int PluginSystem::openFile(const QObject *sender, const QString &filename) {
     }
     auto ret = _win->openFile(filename, &view);
     if (view) {
-        if (ret == ErrFile::AlreadyOpened &&
-            checkPluginHasAlreadyOpened(plg, view)) {
+        if (ret == ErrFile::AlreadyOpened) {
             return ErrFile::AlreadyOpened;
         }
         auto id = assginHandleForOpenPluginView(plg, view);
@@ -3736,21 +3755,8 @@ bool PluginSystem::dispatchEvent(IWingPlugin::RegisteredEvent event,
         }
     } break;
     case WingHex::IWingPlugin::RegisteredEvent::ScriptPragma: {
-        Q_ASSERT(params.size() == 3);
-        auto section = params.at(0).toString();
-        auto plgID = params.at(1).toString();
-        auto &es = _evplgs[event];
-        auto r = std::find_if(
-            es.constBegin(), es.constEnd(),
-            [plgID](IWingPlugin *p) { return getPUID(p) == plgID; });
-        if (r == es.constEnd()) {
-            return false;
-        }
-        auto plg = *r;
-        if (!_pragmaedPlg.contains(plg)) {
-            plg->eventOnScriptPragmaInit();
-        }
-        return plg->eventOnScriptPragma(section, params.at(2).toStringList());
+        Q_ASSERT(false);
+        // should not go there, call processScriptPragma instead
     } break;
     case WingHex::IWingPlugin::RegisteredEvent::ScriptPragmaInit: {
         Q_ASSERT(false);
@@ -3805,6 +3811,28 @@ bool PluginSystem::dispatchEvent(IWingPlugin::RegisteredEvent event,
         return false;
     }
     return true;
+}
+
+std::optional<PragmaResult>
+PluginSystem::processPragma(const QString &section, const QString &plgId,
+                            const QStringList &params) {
+
+    auto &es = _evplgs[WingHex::IWingPlugin::RegisteredEvent::ScriptPragma];
+    auto r =
+        std::find_if(es.constBegin(), es.constEnd(),
+                     [plgId](IWingPlugin *p) { return getPUID(p) == plgId; });
+    if (r == es.constEnd()) {
+        PragmaResult res;
+        res.error.append(QStringLiteral("Unknown pragma command %1 with %2")
+                             .arg(params.join(' '), plgId));
+        return res;
+    }
+    auto plg = *r;
+    if (!_pragmaedPlg.contains(plg)) {
+        plg->eventOnScriptPragmaInit();
+        _pragmaedPlg.append(plg);
+    }
+    return plg->eventOnScriptPragma(section, params);
 }
 
 IWingDevice *PluginSystem::ext2Device(const QString &ext) {
@@ -4512,19 +4540,29 @@ void PluginSystem::loadAllPlugins() {
     auto &set = SettingManager::instance();
     bool enableSet = set.enablePlugin();
 
-    if (enableSet) {
-        if (set.enableMonitor()) {
-            try2LoadManagerPlugin();
-        }
-        if (set.enableHexExt()) {
-            try2LoadHexExtPlugin();
+    bool ok = false;
+    auto disAll =
+        qEnvironmentVariableIntValue("WING_DISABLE_PLUGIN_SYSTEM", &ok);
+    auto marco_Enabled = !ok || (ok && !disAll);
+
+    if (marco_Enabled) {
+        if (enableSet) {
+            auto dis =
+                qEnvironmentVariableIntValue("WING_DISABLE_MONITOR", &ok);
+            if (set.enableMonitor() && (!ok || (ok && !dis))) {
+                try2LoadManagerPlugin();
+            }
+            dis = qEnvironmentVariableIntValue("WING_DISABLE_HEXEXT", &ok);
+            if (set.enableHexExt() && (!ok || (ok && !dis))) {
+                try2LoadHexExtPlugin();
+            }
         }
     }
 
     _enabledExtIDs = set.enabledExtPlugins();
     _enabledDevIDs = set.enabledDevPlugins();
 
-    // manager plugin can not block WingAngelAPI, only settings
+    // manager plugin can be blocked by settings only
     if (set.scriptEnabled()) {
         _angelplg = new WingAngelAPI;
 
@@ -4545,7 +4583,7 @@ void PluginSystem::loadAllPlugins() {
 
     Logger::newLine();
 
-    {
+    if (marco_Enabled) {
         QFile cstructjson(QStringLiteral(
             ":/com.wingsummer.winghex/src/class/WingCStruct.json"));
         auto ret = cstructjson.open(QFile::ReadOnly);
@@ -4582,14 +4620,11 @@ void PluginSystem::loadAllPlugins() {
     Logger::newLine();
 
     if (enableSet) {
-        bool ok = false;
-        auto disAll =
-            qEnvironmentVariableIntValue("WING_DISABLE_PLUGIN_SYSTEM", &ok);
-        if (!ok || (ok && disAll == 0)) {
+        if (marco_Enabled) {
             bool enabledrv = true, enableplg = true;
             auto disdrv =
                 qEnvironmentVariableIntValue("WING_DISABLE_EXTDRV", &ok);
-            if (ok && disdrv != 0) {
+            if (ok && disdrv) {
                 enabledrv = false;
             }
 
@@ -4599,7 +4634,7 @@ void PluginSystem::loadAllPlugins() {
 
             auto displg =
                 qEnvironmentVariableIntValue("WING_DISABLE_PLUGIN", &ok);
-            if ((ok && displg != 0) || !set.enablePlugin()) {
+            if ((ok && displg) || !set.enablePlugin()) {
                 enableplg = false;
             }
 

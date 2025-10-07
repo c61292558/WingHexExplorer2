@@ -23,6 +23,7 @@
 #include "Qt-Advanced-Docking-System/src/DockWidgetTab.h"
 #include "aboutsoftwaredialog.h"
 #include "checksumdialog.h"
+#include "class/angellsp.h"
 #include "class/appmanager.h"
 #include "class/dockcomponentsfactory.h"
 #include "class/eventfilter.h"
@@ -47,8 +48,10 @@
 #include "metadialog.h"
 #include "settings/editorsettingdialog.h"
 #include "settings/generalsettingdialog.h"
+#include "settings/lspsettingdialog.h"
 #include "settings/othersettingsdialog.h"
 #include "settings/pluginsettingdialog.h"
+#include "settings/qeditconfig.h"
 #include "settings/scriptsettingdialog.h"
 
 #include <QAction>
@@ -131,7 +134,7 @@ MainWindow::MainWindow(SplashDialog *splash) : FramelessMainWindow() {
         m_status->addWidget(l);
         m_status->addWidget(m_lblsellen);
 
-        _status = new ScrollableLabel(m_status);
+        _status = new QLabel(m_status);
         m_status->addPermanentWidget(_status);
 
         auto separator = new QFrame(m_status);
@@ -234,13 +237,30 @@ MainWindow::MainWindow(SplashDialog *splash) : FramelessMainWindow() {
         auto smr = sm.init();
         if (smr) {
             plg.doneRegisterScriptObj();
-            auto cfgerr = sm.isEngineConfigError();
+
+            // register the callback for output error message
+            // when configuring error
+            ScriptMachine::RegCallBacks callbacks;
+            callbacks.getInputFn = [this]() -> QString {
+                return m_scriptConsole->getInput();
+            };
+            callbacks.clearFn = [this]() { m_scriptConsole->clearConsole(); };
+            callbacks.printMsgFn =
+                [this](const ScriptMachine::MessageInfo &message) {
+                    m_scriptConsole->onOutput(message);
+                };
+            sm.registerCallBack(ScriptMachine::Interactive, callbacks);
+
+            m_scriptConsole->setMode(QConsoleWidget::Output);
+            auto cfgerr = sm.checkEngineConfigError();
 
             // At this time, AngelScript service plugin has started
             if (cfgerr) {
-                m_scriptConsole->initOutput();
-                m_scriptConsole->setMode(QConsoleWidget::Output);
-                m_scriptConsole->stdErr(tr("EngineConfigError"));
+                ScriptMachine::MessageInfo msg;
+                msg.type = ScriptMachine::MessageType::Error;
+                msg.mode = ScriptMachine::Interactive;
+                msg.message = tr("EngineConfigError");
+                m_scriptConsole->onOutput(msg);
 
                 m_scriptConsole->setEnabled(false);
 
@@ -249,18 +269,6 @@ MainWindow::MainWindow(SplashDialog *splash) : FramelessMainWindow() {
                     false);
             } else {
                 ScriptMachine::RegCallBacks callbacks;
-                callbacks.getInputFn = [this]() -> QString {
-                    return m_scriptConsole->getInput();
-                };
-                callbacks.clearFn = [this]() {
-                    m_scriptConsole->clearConsole();
-                };
-                callbacks.printMsgFn =
-                    [this](const ScriptMachine::MessageInfo &message) {
-                        m_scriptConsole->onOutput(message);
-                    };
-                sm.registerCallBack(ScriptMachine::Interactive, callbacks);
-
                 callbacks.getInputFn = [this]() -> QString {
                     return WingInputDialog::getText(this, tr("InputRequest"),
                                                     tr("PleaseInput"));
@@ -283,18 +291,36 @@ MainWindow::MainWindow(SplashDialog *splash) : FramelessMainWindow() {
 
                 m_scriptConsole->initOutput();
                 m_scriptConsole->setMode(QConsoleWidget::Input);
-
-                if (splash)
-                    splash->setInfoText(tr("SetupScriptEditor"));
-                m_scriptDialog = new ScriptingDialog(this);
-                m_scriptDialog->initConsole();
             }
         } else {
-            QMessageBox::critical(this, qAppName(),
-                                  tr("ScriptEngineInitFailed"));
+            WingMessageBox::critical(this, qAppName(),
+                                     tr("ScriptEngineInitFailed"));
             set.setScriptEnabled(false);
             throw CrashCode::ScriptInitFailed;
         }
+
+        auto &lsp = AngelLsp::instance();
+        if (lsp.start()) {
+            auto ret = lsp.initializeSync();
+            if (!ret.isNull()) {
+                lsp.initialized();
+                connect(&lsp, &AngelLsp::serverExited, this, [this]() {
+                    Toast::toast(this, NAMEICONRES(QStringLiteral("angellsp")),
+                                 tr("AngelLspExited"));
+                });
+            } else {
+                QTimer::singleShot(1000, [this]() {
+                    Toast::toast(this, NAMEICONRES(QStringLiteral("angellsp")),
+                                 tr("AngelLspInitFailed"));
+                });
+            }
+        } else {
+            QTimer::singleShot(1000, [this]() {
+                Toast::toast(this, NAMEICONRES(QStringLiteral("angellsp")),
+                             tr("AngelLspStartFailed"));
+            });
+        }
+        m_scriptConsole->enableLSP();
     }
 
     // connect settings signals
@@ -345,10 +371,6 @@ MainWindow::MainWindow(SplashDialog *splash) : FramelessMainWindow() {
     if (splash)
         splash->setInfoText(tr("SetupWaiting"));
 
-    // others
-    _showtxt = new ShowTextDialog(this);
-    qApp->processEvents();
-
     // update status
     updateEditModeEnabled();
 
@@ -376,33 +398,26 @@ void MainWindow::buildUpRibbonBar() {
 
     m_ribbonMaps[RibbonCatagories::FILE] =
         buildFilePage(m_ribbon->addTab(tr("File")));
-    qApp->processEvents();
     m_ribbonMaps[RibbonCatagories::EDIT] =
         buildEditPage(m_ribbon->addTab(tr("Edit")));
-    qApp->processEvents();
     m_ribbonMaps[RibbonCatagories::VIEW] =
         buildViewPage(m_ribbon->addTab(tr("View")));
-    qApp->processEvents();
 
     auto &set = SettingManager::instance();
     if (set.scriptEnabled()) {
         m_ribbonMaps[RibbonCatagories::SCRIPT] =
             buildScriptPage(m_ribbon->addTab(tr("Script")));
-        qApp->processEvents();
     }
 
     if (set.enablePlugin()) {
         m_ribbonMaps[RibbonCatagories::PLUGIN] =
             buildPluginPage(m_ribbon->addTab(tr("Plugin")));
-        qApp->processEvents();
     }
 
     m_ribbonMaps[RibbonCatagories::SETTING] =
         buildSettingPage(m_ribbon->addTab(tr("Setting")));
-    qApp->processEvents();
     m_ribbonMaps[RibbonCatagories::ABOUT] =
         buildAboutPage(m_ribbon->addTab(tr("About")));
-    qApp->processEvents();
 
     connect(m_ribbon, &Ribbon::onDragDropFiles, this,
             [=](const QStringList &files) {
@@ -449,8 +464,6 @@ void MainWindow::buildUpDockSystem(QWidget *container) {
 
     CDockManager::setAutoHideConfigFlags(CDockManager::DefaultAutoHideConfig);
 
-    qApp->processEvents();
-
     ads::CDockComponentsFactory::setFactory(new DockComponentsFactory);
 
     m_dock = new CDockManager;
@@ -464,16 +477,6 @@ void MainWindow::buildUpDockSystem(QWidget *container) {
                     _editorLock.lockForWrite();
                     swapEditor(m_curEditor, editview);
                     _editorLock.unlock();
-                } else {
-                    for (auto &menu : m_hexContextMenu) {
-                        menu->setProperty("__CONTEXT__", {});
-                    }
-                    m_findresult->setModel(_findEmptyResult);
-                    m_bookmarks->setModel(_bookMarkEmpty);
-                    m_metadatas->setModel(_metadataEmpty);
-                    m_aDelBookMark->setEnabled(false);
-                    m_aDelMetaData->setEnabled(false);
-                    _undoView->setStack(nullptr);
                 }
                 updateEditModeEnabled();
             });
@@ -510,8 +513,6 @@ void MainWindow::buildUpDockSystem(QWidget *container) {
         }
     });
 
-    qApp->processEvents();
-
     // add empty area
     auto label = new QLabel(this);
 
@@ -528,8 +529,6 @@ void MainWindow::buildUpDockSystem(QWidget *container) {
     label->setPicture(backimg);
     label->setAlignment(Qt::AlignCenter);
 
-    qApp->processEvents();
-
     CDockWidget *CentralDockWidget =
         m_dock->createDockWidget(QStringLiteral("CentralWidget"));
     CentralDockWidget->setWidget(label);
@@ -537,13 +536,24 @@ void MainWindow::buildUpDockSystem(QWidget *container) {
     CentralDockWidget->setFeature(ads::CDockWidget::NoTab, true);
     auto editorViewArea = m_dock->setCentralWidget(CentralDockWidget);
 
-    qApp->processEvents();
+    m_lazyVisibleFilter = new EventFilter(QEvent::Show, this);
+    connect(m_lazyVisibleFilter, &EventFilter::eventTriggered, this,
+            [this](QObject *obj, QEvent *) {
+                if (obj == m_numshowtable) {
+                    updateNumberTable();
+                } else if (obj == m_txtDecode) {
+                    updateStringDec({});
+                }
+            });
 
     // build up basic docking widgets
     auto bottomLeftArea =
         buildUpFindResultDock(m_dock, ads::BottomDockWidgetArea);
-
-    qApp->processEvents();
+    bottomLeftArea = buildUpHashResultDock(m_dock, ads::CenterDockWidgetArea,
+                                           bottomLeftArea);
+    bottomLeftArea =
+        buildUpUndoStackDock(m_dock, ads::CenterDockWidgetArea, bottomLeftArea);
+    buildUpLogDock(m_dock, ads::CenterDockWidgetArea, bottomLeftArea);
 
     auto splitter =
         ads::internal::findParent<ads::CDockSplitter *>(editorViewArea);
@@ -552,12 +562,8 @@ void MainWindow::buildUpDockSystem(QWidget *container) {
         splitter->setSizes({height() - bottomHeight, bottomHeight});
     }
 
-    qApp->processEvents();
-
     auto rightArea =
-        buildUpLogDock(m_dock, ads::RightDockWidgetArea, editorViewArea);
-
-    qApp->processEvents();
+        buildUpNumberShowDock(m_dock, ads::RightDockWidgetArea, editorViewArea);
 
     splitter = ads::internal::findParent<ads::CDockSplitter *>(editorViewArea);
     if (splitter) {
@@ -567,37 +573,19 @@ void MainWindow::buildUpDockSystem(QWidget *container) {
 
     m_rightViewArea = rightArea;
 
-    qApp->processEvents();
-
-    buildUpNumberShowDock(m_dock, ads::CenterDockWidgetArea, rightArea);
-    qApp->processEvents();
     buildUpHexBookMarkDock(m_dock, ads::CenterDockWidgetArea, rightArea);
-    qApp->processEvents();
     buildUpHexMetaDataDock(m_dock, ads::CenterDockWidgetArea, rightArea);
-    qApp->processEvents();
     buildUpDecodingStrShowDock(m_dock, ads::CenterDockWidgetArea, rightArea);
-    qApp->processEvents();
-    buildUpUndoStackDock(m_dock, ads::CenterDockWidgetArea, rightArea);
-    qApp->processEvents();
 
     ads::CDockAreaWidget *bottomRightArea;
     if (SettingManager::instance().scriptEnabled()) {
         bottomRightArea = buildUpScriptConsoleDock(
             m_dock, ads::RightDockWidgetArea, bottomLeftArea);
-        qApp->processEvents();
-        buildUpScriptBgOutputDock(m_dock, ads::CenterDockWidgetArea,
-                                  bottomRightArea);
-        qApp->processEvents();
-        buildUpHashResultDock(m_dock, ads::CenterDockWidgetArea,
-                              bottomRightArea);
-        qApp->processEvents();
-    } else {
-        bottomRightArea = buildUpHashResultDock(
-            m_dock, ads::RightDockWidgetArea, bottomLeftArea);
-        qApp->processEvents();
+        bottomRightArea = buildUpScriptBgOutputDock(
+            m_dock, ads::CenterDockWidgetArea, bottomRightArea);
+        buildUpScriptObjDock(m_dock, ads::CenterDockWidgetArea,
+                             bottomRightArea);
     }
-
-    qApp->processEvents();
 
     m_bottomViewArea = bottomRightArea;
 }
@@ -614,7 +602,7 @@ void MainWindow::finishBuildDockSystem() {
     // set the first tab visible
     for (auto &item : m_dock->openedDockAreas()) {
         for (int i = 0; i < item->dockWidgetsCount(); ++i) {
-            qApp->processEvents();
+            updateUI();
             auto d = item->dockWidget(i);
             if (d->features().testFlag(ads::CDockWidget::NoTab)) {
                 continue;
@@ -660,7 +648,7 @@ ads::CDockAreaWidget *
 MainWindow::buildUpFindResultDock(ads::CDockManager *dock,
                                   ads::DockWidgetArea area,
                                   ads::CDockAreaWidget *areaw) {
-    _findEmptyResult = new FindResultModel(this);
+    _findResultModel = new FindResultModel(this);
     m_findresult = new QTableViewExt(this);
     m_findresult->setProperty("EditorView", quintptr(0));
 
@@ -669,44 +657,54 @@ MainWindow::buildUpFindResultDock(ads::CDockManager *dock,
         Qt::ContextMenuPolicy::CustomContextMenu);
 
     auto se = [=]() {
-        auto model = qobject_cast<FindResultModel *>(m_findresult->model());
-        if (model) {
+        if (_findResultModel->isValid()) {
             m_find->setWindowTitle(tr("FindResult") + QStringLiteral(" (") +
-                                   model->encoding() + QStringLiteral(")"));
+                                   _findResultModel->encoding() +
+                                   QStringLiteral(")"));
+        } else {
+            m_find->setWindowTitle(tr("FindResult"));
         }
     };
 
     auto menu = new QMenu(tr("Encoding"), this);
     menu->setIcon(ICONRES(QStringLiteral("encoding")));
-    auto aGroup = new QActionGroup(this);
+    auto aGroup = new QActionGroup(menu);
+    aGroup->setParent(menu);
     auto langs = Utilities::getEncodings();
     for (auto &l : langs) {
         auto a = newCheckableAction(menu, l, [=]() {
-            auto model = qobject_cast<FindResultModel *>(m_findresult->model());
-            if (model) {
-                model->setEncoding(l);
-                se();
-            }
+            _findResultModel->setEncoding(l);
+            se();
         });
-        aGroup->addAction(a);
+        a->setActionGroup(aGroup);
         menu->addAction(a);
         m_findEncoding.insert(l, a);
     }
+    if (langs.isEmpty()) {
+        aGroup->deleteLater();
+    }
+
+    connect(_findResultModel, &FindResultModel::modelReset, menu, [=]() {
+        auto r = _findResultModel->isValid();
+        menu->setEnabled(r);
+        if (r) {
+            m_findEncoding.value(_findResultModel->encoding())
+                ->setChecked(true);
+        }
+        se();
+    });
 
     m_menuFind = new QMenu(m_findresult);
     m_menuFind->addMenu(menu);
+    menu->setEnabled(false);
     m_menuFind->addAction(
         newAction(QStringLiteral("copy"), tr("Copy"), [this]() {
             auto idx = m_findresult->currentIndex();
             if (idx.isValid()) {
-                auto model =
-                    qobject_cast<FindResultModel *>(m_findresult->model());
-                if (model) {
-                    auto content = model->copyContent(idx);
-                    qApp->clipboard()->setText(content);
-                    Toast::toast(this, NAMEICONRES(QStringLiteral("copy")),
-                                 tr("CopyToClipBoard"));
-                }
+                auto content = _findResultModel->copyContent(idx);
+                qApp->clipboard()->setText(content);
+                Toast::toast(this, NAMEICONRES(QStringLiteral("copy")),
+                             tr("CopyToClipBoard"));
             }
         }));
     m_menuFind->addAction(newAction(QStringLiteral("export"),
@@ -723,26 +721,18 @@ MainWindow::buildUpFindResultDock(ads::CDockManager *dock,
 
     m_findresult->setItemDelegate(new RichTextItemDelegate(m_findresult));
 
-    m_findresult->setModel(_findEmptyResult);
-    m_findEncoding.value(_findEmptyResult->encoding())->setChecked(true);
+    m_findresult->setModel(_findResultModel);
 
     connect(m_findresult, &QTableView::doubleClicked, this,
             [=](const QModelIndex &index) {
-                auto editor =
-                    m_findresult->property("EditorView").value<EditorView *>();
-                auto hexeditor = currentEditor();
-                if (hexeditor != editor) {
-                    editor->raise();
-                    editor->setFocus();
-                }
-
+                auto editor = currentEditor();
                 auto e = editor->hexEditor();
-                auto fm = editor->findResultModel();
+                auto fm = editor->findResult();
                 auto cursor = e->cursor();
 
-                cursor->moveTo(fm->resultAt(index.row()).offset);
+                cursor->moveTo(fm.results.at(index.row()).offset);
                 if (cursor->selectionCount() <= 1 && index.column() >= 3) {
-                    cursor->select(fm->lastFindData().second);
+                    cursor->select(fm.lastFindData.second);
                 }
             });
 
@@ -837,6 +827,7 @@ MainWindow::buildUpNumberShowDock(ads::CDockManager *dock,
 
     auto dw = buildDockWidget(dock, QStringLiteral("Number"), tr("Number"),
                               m_numshowtable);
+    m_numshowtable->installEventFilter(m_lazyVisibleFilter);
     return dock->addDockWidget(area, dw, areaw);
 }
 
@@ -844,35 +835,35 @@ ads::CDockAreaWidget *
 MainWindow::buildUpHashResultDock(ads::CDockManager *dock,
                                   ads::DockWidgetArea area,
                                   ads::CDockAreaWidget *areaw) {
-    m_hashtable = new QTableViewExt(this);
-    Utilities::applyTableViewProperty(m_hashtable);
-    m_hashtable->setColumnWidth(0, 350);
+    auto hashtable = new QTableViewExt(this);
+    Utilities::applyTableViewProperty(hashtable);
+    hashtable->setColumnWidth(0, 350);
 
     _hashModel = new CheckSumModel(this);
-    m_hashtable->setModel(_hashModel);
+    hashtable->setModel(_hashModel);
 
-    m_hashtable->setContextMenuPolicy(
-        Qt::ContextMenuPolicy::ActionsContextMenu);
+    hashtable->setContextMenuPolicy(Qt::ContextMenuPolicy::ActionsContextMenu);
 
     auto a = newAction(ICONRES(QStringLiteral("copy")), tr("Copy"), [=] {
-        auto r = m_hashtable->currentIndex();
+        auto r = hashtable->currentIndex();
         qApp->clipboard()->setText(
             _hashModel->checkSumData(QCryptographicHash::Algorithm(r.row())));
         Toast::toast(this, NAMEICONRES(QStringLiteral("copy")),
                      tr("CopyToClipBoard"));
     });
-    m_hashtable->addAction(a);
+    hashtable->addAction(a);
     a = newAction(QStringLiteral("del"), tr("Clear"),
                   [=]() { _hashModel->clearData(); });
-    m_hashtable->addAction(a);
-    connect(m_hashtable->selectionModel(),
+    hashtable->addAction(a);
+    connect(hashtable->selectionModel(),
             &QItemSelectionModel::currentRowChanged, a,
             [=](const QModelIndex &current, const QModelIndex &) {
                 a->setEnabled(current.isValid());
             });
 
     auto dw = buildDockWidget(dock, QStringLiteral("CheckSum"), tr("CheckSum"),
-                              m_hashtable);
+                              hashtable);
+    m_hashtable = dw;
     return dock->addDockWidget(area, dw, areaw);
 }
 
@@ -880,50 +871,44 @@ ads::CDockAreaWidget *
 MainWindow::buildUpHexBookMarkDock(ads::CDockManager *dock,
                                    ads::DockWidgetArea area,
                                    ads::CDockAreaWidget *areaw) {
-    _bookMarkEmpty = new BookMarksModel(nullptr);
+    _bookMarkModel = new BookMarksModel(nullptr);
+    auto bookmarks = new QTableViewExt(this);
+    Utilities::applyTableViewProperty(bookmarks);
+    bookmarks->setSelectionMode(QTableViewExt::ExtendedSelection);
+    bookmarks->setModel(_bookMarkModel);
 
-    m_bookmarks = new QTableViewExt(this);
-    Utilities::applyTableViewProperty(m_bookmarks);
-    m_bookmarks->setSelectionMode(QTableViewExt::ExtendedSelection);
-
-    m_bookmarks->setModel(_bookMarkEmpty);
-
-    connect(m_bookmarks, &QTableView::doubleClicked, this,
+    connect(bookmarks, &QTableView::doubleClicked, this,
             [=](const QModelIndex &index) {
                 auto hexeditor = currentHexView();
                 if (hexeditor == nullptr) {
                     return;
                 }
                 hexeditor->renderer()->enableCursor(true);
-
-                auto model = m_bookmarks->model();
-
+                QAbstractItemModel *model = _bookMarkModel;
                 auto offIndex = model->index(index.row(), 0);
                 auto offset = model->data(offIndex).value<qsizetype>();
                 hexeditor->cursor()->moveTo(offset);
             });
 
-    m_bookmarks->addAction(
-        newAction(QStringLiteral("export"), tr("ExportResult"), [this]() {
-            auto model = m_bookmarks->model();
-            saveTableContent(model);
-        }));
+    bookmarks->addAction(
+        newAction(QStringLiteral("export"), tr("ExportResult"),
+                  [this]() { saveTableContent(_bookMarkModel); }));
 
-    auto sep = new QAction(m_bookmarks);
+    auto sep = new QAction(bookmarks);
     sep->setSeparator(true);
-    m_bookmarks->addAction(sep);
+    bookmarks->addAction(sep);
 
     m_aDelBookMark = new QAction(ICONRES(QStringLiteral("bookmarkdel")),
-                                 tr("DeleteBookMark"), m_bookmarks);
+                                 tr("DeleteBookMark"), bookmarks);
     connect(m_aDelBookMark, &QAction::triggered, this, [=] {
         auto hexeditor = currentHexView();
         if (hexeditor == nullptr) {
             return;
         }
-        auto s = m_bookmarks->selectionModel()->selectedRows();
+        auto s = bookmarks->selectionModel()->selectedRows();
         auto doc = hexeditor->document();
 
-        auto model = m_bookmarks->model();
+        auto model = bookmarks->model();
 
         QList<qsizetype> pos;
         for (auto &item : s) {
@@ -932,23 +917,29 @@ MainWindow::buildUpHexBookMarkDock(ads::CDockManager *dock,
             pos.append(offset);
         }
 
-        m_bookmarks->clearSelection();
+        bookmarks->clearSelection();
         doc->RemoveBookMarks(pos);
         Q_EMIT model->layoutChanged();
     });
     m_aDelBookMark->setEnabled(false);
-    m_bookmarks->addAction(m_aDelBookMark);
+    bookmarks->addAction(m_aDelBookMark);
 
     auto a = new QAction(ICONRES(QStringLiteral("bookmarkcls")),
-                         tr("ClearBookMark"), m_bookmarks);
+                         tr("ClearBookMark"), bookmarks);
     connect(a, &QAction::triggered, this, &MainWindow::on_bookmarkcls);
-    m_bookmarks->addAction(a);
+    bookmarks->addAction(a);
 
-    m_bookmarks->setContextMenuPolicy(
-        Qt::ContextMenuPolicy::ActionsContextMenu);
+    bookmarks->setContextMenuPolicy(Qt::ContextMenuPolicy::ActionsContextMenu);
+
+    connect(bookmarks->selectionModel(), &QItemSelectionModel::selectionChanged,
+            m_aDelBookMark,
+            [=](const QItemSelection &, const QItemSelection &) {
+                m_aDelBookMark->setEnabled(
+                    bookmarks->selectionModel()->hasSelection());
+            });
 
     auto dw = buildDockWidget(dock, QStringLiteral("BookMark"), tr("BookMark"),
-                              m_bookmarks);
+                              bookmarks);
     return dock->addDockWidget(area, dw, areaw);
 }
 
@@ -956,15 +947,14 @@ ads::CDockAreaWidget *
 MainWindow::buildUpHexMetaDataDock(ads::CDockManager *dock,
                                    ads::DockWidgetArea area,
                                    ads::CDockAreaWidget *areaw) {
-    _metadataEmpty = new MetaDataModel(nullptr);
+    _metadataModel = new MetaDataModel(nullptr);
+    auto metadatas = new QTableViewExt(this);
+    Utilities::applyTableViewProperty(metadatas);
+    metadatas->setSelectionMode(QTableViewExt::ExtendedSelection);
 
-    m_metadatas = new QTableViewExt(this);
-    Utilities::applyTableViewProperty(m_metadatas);
-    m_metadatas->setSelectionMode(QTableViewExt::ExtendedSelection);
+    metadatas->setModel(_metadataModel);
 
-    m_metadatas->setModel(_metadataEmpty);
-
-    connect(m_metadatas, &QTableView::doubleClicked, this,
+    connect(metadatas, &QTableView::doubleClicked, this,
             [=](const QModelIndex &index) {
                 auto hexeditor = currentHexView();
                 if (hexeditor == nullptr) {
@@ -972,31 +962,29 @@ MainWindow::buildUpHexMetaDataDock(ads::CDockManager *dock,
                 }
                 hexeditor->renderer()->enableCursor(true);
 
-                auto model = m_metadatas->model();
+                auto model = metadatas->model();
                 auto offIndex = model->index(index.row(), 0);
                 auto offset =
                     model->data(offIndex, Qt::UserRole).value<qsizetype>();
                 hexeditor->cursor()->moveTo(offset);
             });
 
-    m_metadatas->addAction(
-        newAction(QStringLiteral("export"), tr("ExportResult"), [this]() {
-            auto model = m_metadatas->model();
-            saveTableContent(model);
-        }));
+    metadatas->addAction(
+        newAction(QStringLiteral("export"), tr("ExportResult"),
+                  [this]() { saveTableContent(_metadataModel); }));
 
-    auto sep = new QAction(m_metadatas);
+    auto sep = new QAction(metadatas);
     sep->setSeparator(true);
-    m_metadatas->addAction(sep);
+    metadatas->addAction(sep);
 
     m_aDelMetaData = new QAction(ICONRES(QStringLiteral("metadatadel")),
-                                 tr("DeleteMetadata"), m_metadatas);
+                                 tr("DeleteMetadata"), metadatas);
     connect(m_aDelMetaData, &QAction::triggered, this, [=] {
         auto hexeditor = currentHexView();
         if (hexeditor == nullptr) {
             return;
         }
-        auto s = m_metadatas->selectionModel()->selectedRows();
+        auto s = metadatas->selectionModel()->selectedRows();
         auto doc = hexeditor->document();
 
         const auto &mds = doc->metadata()->getAllMetadata();
@@ -1006,23 +994,28 @@ MainWindow::buildUpHexMetaDataDock(ads::CDockManager *dock,
             pmetas.push_back(mds.at(item.row()));
         }
 
-        m_metadatas->clearSelection();
+        metadatas->clearSelection();
         hexeditor->document()->metadata()->RemoveMetadatas(pmetas);
-        Q_EMIT m_metadatas->model()->layoutChanged();
+        Q_EMIT metadatas->model()->layoutChanged();
     });
     m_aDelMetaData->setEnabled(false);
-    m_metadatas->addAction(m_aDelMetaData);
+    metadatas->addAction(m_aDelMetaData);
 
     auto a = new QAction(ICONRES(QStringLiteral("metadatacls")),
-                         tr("ClearMetadata"), m_metadatas);
+                         tr("ClearMetadata"), metadatas);
     connect(a, &QAction::triggered, this, &MainWindow::on_metadatacls);
-    m_metadatas->addAction(a);
+    metadatas->addAction(a);
+    metadatas->setContextMenuPolicy(Qt::ContextMenuPolicy::ActionsContextMenu);
 
-    m_metadatas->setContextMenuPolicy(
-        Qt::ContextMenuPolicy::ActionsContextMenu);
+    connect(metadatas->selectionModel(), &QItemSelectionModel::selectionChanged,
+            m_aDelMetaData,
+            [=](const QItemSelection &, const QItemSelection &) {
+                m_aDelMetaData->setEnabled(
+                    metadatas->selectionModel()->hasSelection());
+            });
 
     auto dw = buildDockWidget(dock, QStringLiteral("MetaData"), tr("MetaData"),
-                              m_metadatas);
+                              metadatas);
     return dock->addDockWidget(area, dw, areaw);
 }
 
@@ -1051,6 +1044,7 @@ MainWindow::buildUpDecodingStrShowDock(ads::CDockManager *dock,
 
     connect(m_txtDecode, &QTextBrowser::windowTitleChanged, dw,
             &QDockWidget::setWindowTitle);
+    m_txtDecode->installEventFilter(m_lazyVisibleFilter);
     return dock->addDockWidget(area, dw, areaw);
 }
 
@@ -1059,14 +1053,7 @@ MainWindow::buildUpScriptConsoleDock(ads::CDockManager *dock,
                                      ads::DockWidgetArea area,
                                      ads::CDockAreaWidget *areaw) {
     m_scriptConsole = new ScriptingConsole(this);
-
-    connect(m_scriptConsole, &ScriptingConsole::consoleCommand, this,
-            [this] { showStatus({}); });
-    connect(m_scriptConsole, &ScriptingConsole::onFunctionTip, this,
-            [this](const QString &content) {
-                showStatus(QStringLiteral("<b><font color=\"gold\">") +
-                           content + QStringLiteral("</font></b>"));
-            });
+    m_scriptConsole->setIsTerminal(true);
     connect(m_scriptConsole, &ScriptingConsole::abortEvaluation, this,
             [this]() {
                 auto &sm = ScriptMachine::instance();
@@ -1133,6 +1120,152 @@ MainWindow::buildUpScriptBgOutputDock(ads::CDockManager *dock,
 }
 
 ads::CDockAreaWidget *
+MainWindow::buildUpScriptObjDock(ads::CDockManager *dock,
+                                 ads::DockWidgetArea area,
+                                 ads::CDockAreaWidget *areaw) {
+    _scriptObjView = new asIDBTreeView(this);
+
+    connect(
+        m_scriptConsole, &ScriptingConsole::consoleScriptRunFinished, this,
+        [this]() {
+            auto &m = ScriptMachine::instance();
+            auto mod = m.module(ScriptMachine::Interactive);
+            if (mod == nullptr) {
+                return;
+            }
+
+            auto globals = std::make_shared<asIDBVariable>(*m.debugger());
+
+            // copy from asIDBCache
+            auto typeNameFromType = [](const asIDBTypeId &id) -> std::string {
+                static asIDBTypeNameMap type_names; // cached name
+                auto ret = type_names.find(id);
+                if (ret != type_names.end()) {
+                    return ret->second;
+                }
+
+                auto engine = ScriptMachine::instance().engine();
+                auto type = engine->GetTypeInfoById(id.typeId);
+                const char *rawName;
+
+                if (!type) {
+                    // a primitive
+                    switch (id.typeId & asTYPEID_MASK_SEQNBR) {
+                    case asTYPEID_BOOL:
+                        rawName = "bool";
+                        break;
+                    case asTYPEID_INT8:
+                        rawName = "int8";
+                        break;
+                    case asTYPEID_INT16:
+                        rawName = "int16";
+                        break;
+                    case asTYPEID_INT32:
+                        rawName = "int32";
+                        break;
+                    case asTYPEID_INT64:
+                        rawName = "int64";
+                        break;
+                    case asTYPEID_UINT8:
+                        rawName = "uint8";
+                        break;
+                    case asTYPEID_UINT16:
+                        rawName = "uint16";
+                        break;
+                    case asTYPEID_UINT32:
+                        rawName = "uint32";
+                        break;
+                    case asTYPEID_UINT64:
+                        rawName = "uint64";
+                        break;
+                    case asTYPEID_FLOAT:
+                        rawName = "float";
+                        break;
+                    case asTYPEID_DOUBLE:
+                        rawName = "double";
+                        break;
+                    default:
+                        rawName = "???";
+                        break;
+                    }
+                } else {
+                    rawName = type->GetName();
+                }
+
+                std::string name = fmt::format(
+                    "{}{}{}{}", (id.modifiers & asTM_CONST) ? "const " : "",
+                    rawName,
+                    (id.typeId & (asTYPEID_HANDLETOCONST | asTYPEID_OBJHANDLE))
+                        ? "@"
+                        : "",
+                    ((id.modifiers & asTM_INOUTREF) == asTM_INOUTREF) ? "&"
+                    : ((id.modifiers & asTM_INOUTREF) == asTM_INREF)  ? "&in"
+                    : ((id.modifiers & asTM_INOUTREF) == asTM_OUTREF) ? "&out"
+                                                                      : "");
+                type_names.emplace(id, std::move(name));
+                return name;
+            };
+
+            for (asUINT n = 0; n < mod->GetGlobalVarCount(); n++) {
+                const char *name;
+                const char *nameSpace;
+                int typeId;
+                void *ptr;
+                bool isConst;
+
+                mod->GetGlobalVar(n, &name, &nameSpace, &typeId, &isConst);
+                ptr = mod->GetAddressOfGlobalVar(n);
+
+                asIDBTypeId typeKey{typeId, isConst ? asTM_CONST : asTM_NONE};
+                const auto viewType = typeNameFromType(typeKey);
+
+                asIDBVarAddr idKey{typeId, isConst, ptr};
+
+                globals->CreateChildVariable(
+                    asIDBVarName((nameSpace && nameSpace[0]) ? nameSpace : "",
+                                 name),
+                    idKey, viewType);
+            }
+
+            for (asUINT n = 0; n < mod->GetEngine()->GetGlobalPropertyCount();
+                 n++) {
+                const char *name;
+                const char *nameSpace;
+                int typeId;
+                void *ptr;
+                bool isConst;
+
+                mod->GetEngine()->GetGlobalPropertyByIndex(
+                    n, &name, &nameSpace, &typeId, &isConst, nullptr, &ptr);
+
+                asIDBTypeId typeKey{typeId, isConst ? asTM_CONST : asTM_NONE};
+                const auto viewType = typeNameFromType(typeKey);
+
+                asIDBVarAddr idKey{typeId, isConst, ptr};
+
+                std::string localName =
+                    (nameSpace && nameSpace[0])
+                        ? fmt::format("{}::{}", nameSpace, name)
+                        : name;
+
+                globals->CreateChildVariable(std::move(localName), idKey,
+                                             viewType);
+            }
+
+            globals->evaluated = globals->expanded = true;
+
+            if (!globals->namedProps.empty() || !globals->indexedProps.empty())
+                globals->SetRefId();
+
+            _scriptObjView->refreshWithNewRoot(globals);
+        });
+
+    auto dw = buildDockWidget(dock, QStringLiteral("ConsoleObj"),
+                              tr("ConsoleObj"), _scriptObjView);
+    return dock->addDockWidget(area, dw, areaw);
+}
+
+ads::CDockAreaWidget *
 MainWindow::buildUpUndoStackDock(ads::CDockManager *dock,
                                  ads::DockWidgetArea area,
                                  ads::CDockAreaWidget *areaw) {
@@ -1143,6 +1276,7 @@ MainWindow::buildUpUndoStackDock(ads::CDockManager *dock,
 }
 
 RibbonTabContent *MainWindow::buildFilePage(RibbonTabContent *tab) {
+    updateUI();
     auto shortcuts = QKeySequences::instance();
     {
         auto pannel = tab->addGroup(tr("Basic"));
@@ -1202,6 +1336,7 @@ RibbonTabContent *MainWindow::buildFilePage(RibbonTabContent *tab) {
 }
 
 RibbonTabContent *MainWindow::buildEditPage(RibbonTabContent *tab) {
+    updateUI();
     auto shortcuts = QKeySequences::instance();
     {
         auto pannel = tab->addGroup(tr("General"));
@@ -1313,6 +1448,7 @@ RibbonTabContent *MainWindow::buildEditPage(RibbonTabContent *tab) {
 }
 
 RibbonTabContent *MainWindow::buildViewPage(RibbonTabContent *tab) {
+    updateUI();
     auto shortcuts = QKeySequences::instance();
     {
         auto pannel = tab->addGroup(tr("Display"));
@@ -1521,12 +1657,8 @@ RibbonTabContent *MainWindow::buildViewPage(RibbonTabContent *tab) {
         auto &l = LayoutManager::instance().layouts();
 
         auto menu = new QMenu(this);
-        menu->addAction(newAction(tr("Default"), [this]() {
-            showStatus(tr("LayoutRestoring..."));
-            qApp->processEvents();
-            m_dock->restoreState(_defaultLayout);
-            showStatus({});
-        }));
+        menu->addAction(newAction(tr("Default"),
+                                  [this]() { restoreLayout(_defaultLayout); }));
 
         if (!l.isEmpty()) {
             menu->addSeparator();
@@ -1534,12 +1666,8 @@ RibbonTabContent *MainWindow::buildViewPage(RibbonTabContent *tab) {
 
         for (auto p = l.constKeyValueBegin(); p != l.constKeyValueEnd(); ++p) {
             auto layout = p->second;
-            menu->addAction(newAction(p->first, [this, layout]() {
-                showStatus(tr("LayoutRestoring..."));
-                qApp->processEvents();
-                m_dock->restoreState(layout);
-                showStatus({});
-            }));
+            menu->addAction(newAction(
+                p->first, [this, layout]() { restoreLayout(layout); }));
         }
 
         m_toolBtneditors.insert(
@@ -1551,20 +1679,11 @@ RibbonTabContent *MainWindow::buildViewPage(RibbonTabContent *tab) {
                         tr("SaveLayout"), &MainWindow::on_saveLayout);
     }
 
-    {
-        auto pannel = tab->addGroup(tr("Log"));
-        addPannelAction(pannel, QStringLiteral("log"), tr("ExportLog"),
-                        &MainWindow::on_exportlog);
-        addPannelAction(pannel, QStringLiteral("clearhis"), tr("ClearLog"),
-                        &MainWindow::on_clslog);
-        addPannelAction(pannel, QStringLiteral("qtloginspect"), tr("InsepctQt"),
-                        &MainWindow::on_inspectQt);
-    }
-
     return tab;
 }
 
 RibbonTabContent *MainWindow::buildScriptPage(RibbonTabContent *tab) {
+    updateUI();
     {
         auto pannel = tab->addGroup(tr("Basic"));
         addPannelAction(pannel, QStringLiteral("script"), tr("ScriptEditor"),
@@ -1585,6 +1704,7 @@ RibbonTabContent *MainWindow::buildScriptPage(RibbonTabContent *tab) {
 }
 
 RibbonTabContent *MainWindow::buildPluginPage(RibbonTabContent *tab) {
+    updateUI();
     auto shortcuts = QKeySequences::instance();
     {
         auto pannel = tab->addGroup(tr("General"));
@@ -1605,6 +1725,7 @@ RibbonTabContent *MainWindow::buildPluginPage(RibbonTabContent *tab) {
 }
 
 RibbonTabContent *MainWindow::buildSettingPage(RibbonTabContent *tab) {
+    updateUI();
     auto shortcuts = QKeySequences::instance();
 
     auto &set = SettingManager::instance();
@@ -1633,22 +1754,31 @@ RibbonTabContent *MainWindow::buildSettingPage(RibbonTabContent *tab) {
 }
 
 RibbonTabContent *MainWindow::buildAboutPage(RibbonTabContent *tab) {
-    auto pannel = tab->addGroup(tr("Info"));
+    updateUI();
 
-    addPannelAction(pannel, QStringLiteral("soft"), tr("Software"),
-                    &MainWindow::on_about);
+    {
+        auto pannel = tab->addGroup(tr("Info"));
+        addPannelAction(pannel, QStringLiteral("soft"), tr("Software"),
+                        &MainWindow::on_about);
+        addPannelAction(pannel, QStringLiteral("sponsor"), tr("Sponsor"),
+                        &MainWindow::on_sponsor);
+        addPannelAction(pannel, QStringLiteral("wiki"), tr("Wiki"),
+                        &MainWindow::on_wiki);
+        addPannelAction(pannel, QStringLiteral("qt"), tr("AboutQT"),
+                        [this] { WingMessageBox::aboutQt(this); });
+        addPannelAction(pannel, QStringLiteral("update"), tr("CheckUpdate"),
+                        &MainWindow::on_update);
+    }
 
-    addPannelAction(pannel, QStringLiteral("sponsor"), tr("Sponsor"),
-                    &MainWindow::on_sponsor);
-
-    addPannelAction(pannel, QStringLiteral("wiki"), tr("Wiki"),
-                    &MainWindow::on_wiki);
-
-    addPannelAction(pannel, QStringLiteral("qt"), tr("AboutQT"),
-                    [this] { WingMessageBox::aboutQt(this); });
-
-    addPannelAction(pannel, QStringLiteral("update"), tr("CheckUpdate"),
-                    &MainWindow::on_update);
+    {
+        auto pannel = tab->addGroup(tr("Log"));
+        addPannelAction(pannel, QStringLiteral("log"), tr("ExportLog"),
+                        &MainWindow::on_exportlog);
+        addPannelAction(pannel, QStringLiteral("clearhis"), tr("ClearLog"),
+                        &MainWindow::on_clslog);
+        addPannelAction(pannel, QStringLiteral("qtloginspect"), tr("InsepctQt"),
+                        &MainWindow::on_inspectQt);
+    }
 
     return tab;
 }
@@ -1656,9 +1786,10 @@ RibbonTabContent *MainWindow::buildAboutPage(RibbonTabContent *tab) {
 void MainWindow::buildUpSettingDialog() {
     QStringList usedIDs;
     QString id;
+    auto &set = SettingManager::instance();
 
     m_setdialog = new SettingDialog(this);
-    qApp->processEvents();
+    updateUI();
 
     auto generalPage = new GeneralSettingDialog(m_setdialog);
     connect(generalPage, &SettingPage::optionNeedRestartChanged, m_setdialog,
@@ -1668,7 +1799,7 @@ void MainWindow::buildUpSettingDialog() {
     Q_ASSERT(!id.isEmpty());
     Q_ASSERT(usedIDs.indexOf(id) < 0);
     usedIDs.append(id);
-    qApp->processEvents();
+    updateUI();
 
     auto editorPage = new EditorSettingDialog(m_setdialog);
     connect(editorPage, &SettingPage::optionNeedRestartChanged, m_setdialog,
@@ -1678,7 +1809,7 @@ void MainWindow::buildUpSettingDialog() {
     Q_ASSERT(!id.isEmpty());
     Q_ASSERT(usedIDs.indexOf(id) < 0);
     usedIDs.append(id);
-    qApp->processEvents();
+    updateUI();
 
     auto plgPage = new PluginSettingDialog(m_setdialog);
     connect(plgPage, &SettingPage::optionNeedRestartChanged, m_setdialog,
@@ -1688,7 +1819,7 @@ void MainWindow::buildUpSettingDialog() {
     Q_ASSERT(!id.isEmpty());
     Q_ASSERT(usedIDs.indexOf(id) < 0);
     usedIDs.append(id);
-    qApp->processEvents();
+    updateUI();
 
     auto scriptPage = new ScriptSettingDialog(m_setdialog);
     connect(scriptPage, &SettingPage::optionNeedRestartChanged, m_setdialog,
@@ -1698,16 +1829,18 @@ void MainWindow::buildUpSettingDialog() {
     Q_ASSERT(!id.isEmpty());
     Q_ASSERT(usedIDs.indexOf(id) < 0);
     usedIDs.append(id);
-    qApp->processEvents();
+    updateUI();
 
     auto otherPage = new OtherSettingsDialog(m_setdialog);
     id = otherPage->id();
     Q_ASSERT(!id.isEmpty());
     Q_ASSERT(usedIDs.indexOf(id) < 0);
     usedIDs.append(id);
-    qApp->processEvents();
+    updateUI();
 
     for (auto &page : m_settingPages) {
+        updateUI();
+
         auto name = page->name();
         auto id = page->id();
 
@@ -1739,15 +1872,40 @@ void MainWindow::buildUpSettingDialog() {
                             [=] { m_setdialog->showConfig(id); });
         }
         usedIDs.append(id);
-        qApp->processEvents();
     }
 
     connect(otherPage, &SettingPage::optionNeedRestartChanged, m_setdialog,
             &SettingDialog::toastTakeEffectReboot);
     m_setdialog->addPage(otherPage);
-    qApp->processEvents();
+    updateUI();
 
     m_setdialog->build();
+    auto ge = set.settingsLayout();
+    if (!ge.isEmpty()) {
+        m_setdialog->restoreLayout(ge);
+    }
+    connect(m_setdialog, &SettingDialog::onClosing, this, [this]() {
+        SettingManager::instance().setSettingsLayout(m_setdialog->saveLayout());
+    });
+
+    // script settings
+    m_scriptsetdlg = new SettingDialog(this);
+    auto edit = new QEditConfig(false, m_scriptsetdlg);
+    m_scriptsetdlg->addPage(edit);
+    edit = new QEditConfig(true, m_scriptsetdlg);
+    m_scriptsetdlg->addPage(edit);
+    auto lspset = new LspSettingDialog(this);
+    m_scriptsetdlg->addPage(lspset);
+    m_scriptsetdlg->build();
+
+    ge = set.settingsScriptLayout();
+    if (!ge.isEmpty()) {
+        m_scriptsetdlg->restoreLayout(ge);
+    }
+    connect(m_scriptsetdlg, &SettingDialog::onClosing, this, [this]() {
+        SettingManager::instance().setSettingsScriptLayout(
+            m_scriptsetdlg->saveLayout());
+    });
 }
 
 void MainWindow::installPluginEditorWidgets() {
@@ -1761,7 +1919,7 @@ void MainWindow::installPluginEditorWidgets() {
          p != m_editorViewWidgets.constKeyValueEnd(); ++p) {
         decltype(newEditorViewWidgets)::mapped_type newCreatorList;
         for (auto &wctor : p->second) {
-            qApp->processEvents();
+            updateUI();
 
             auto id = wctor->id();
             if (names.contains(id)) {
@@ -1786,7 +1944,7 @@ void MainWindow::installPluginEditorWidgets() {
             newCreatorList.append(wctor);
         }
         newEditorViewWidgets.insert(p->first, newCreatorList);
-        qApp->processEvents();
+        updateUI();
     }
 
     m_editorViewWidgets = newEditorViewWidgets;
@@ -1835,8 +1993,10 @@ void MainWindow::on_openfile() {
         }
         if (res == ErrFile::AlreadyOpened) {
             Q_ASSERT(editor);
-            editor->raise();
-            editor->setFocus();
+            if (editor) {
+                editor->raise();
+                editor->setFocus();
+            }
             return;
         }
 
@@ -1869,8 +2029,10 @@ void MainWindow::on_openworkspace() {
     }
     if (res == ErrFile::AlreadyOpened) {
         Q_ASSERT(editor);
-        editor->raise();
-        editor->setFocus();
+        if (editor) {
+            editor->raise();
+            editor->setFocus();
+        }
         return;
     }
 
@@ -2177,15 +2339,15 @@ void MainWindow::on_findfile() {
         auto r = fd.getResult();
         info.isStringFind = r.isStringFind;
         info.encoding = r.encoding;
-        info.str = r.str;
+        info.findValue = r.value;
 
         showStatus(tr("Finding..."));
         ExecAsync<EditorView::FindError>(
-            [this, r]() -> EditorView::FindError {
+            [this, r, editor]() -> EditorView::FindError {
                 m_isfinding = true;
-                return currentEditor()->find(r);
+                return editor->find(r);
             },
-            [this](EditorView::FindError err) {
+            [this, editor](EditorView::FindError err) {
                 switch (err) {
                 case EditorView::FindError::Success:
                     Toast::toast(this, NAMEICONRES(QStringLiteral("find")),
@@ -2201,12 +2363,9 @@ void MainWindow::on_findfile() {
                     break;
                 }
 
-                auto result =
-                    qobject_cast<FindResultModel *>(m_findresult->model());
-                if (result) {
-                    m_findEncoding.value(result->encoding())->setChecked(true);
-                }
-
+                auto r = editor->findResult();
+                m_findEncoding.value(r.encoding)->setChecked(true);
+                _findResultModel->refresh();
                 auto header = m_findresult->horizontalHeader();
                 auto font = QFontMetrics(m_findresult->font());
                 auto len = font.horizontalAdvance('F') * (15 + 16 * 2);
@@ -2249,38 +2408,10 @@ void MainWindow::on_checksum() {
     CheckSumDialog d;
     if (d.exec()) {
         auto cs = d.getResults();
-        auto hashes = Utilities::supportedHashAlgorithms();
-
-        if (editor->hexEditor()->hasSelection()) {
-            auto data = editor->hexEditor()->selectedBytes();
-            for (auto &c : cs) {
-                auto h = hashes.at(c);
-                QCryptographicHash hash(h);
-                hash.addData(data.join());
-                _hashModel->setCheckSumData(h, hash.result().toHex().toUpper());
-            }
-        } else {
-            if (editor->isNewFile()) {
-                auto bytes = editor->hexEditor()->document()->read(0);
-                for (auto &c : cs) {
-                    auto h = hashes.at(c);
-                    QCryptographicHash hash(h);
-                    hash.addData(bytes);
-                    _hashModel->setCheckSumData(
-                        h, hash.result().toHex().toUpper());
-                }
-            } else {
-                QFile f(editor->fileName());
-                for (auto &c : cs) {
-                    auto h = hashes.at(c);
-                    QCryptographicHash hash(h);
-                    hash.addData(&f);
-                    _hashModel->setCheckSumData(
-                        h, hash.result().toHex().toUpper());
-                }
-            }
-        }
+        editor->getCheckSum(cs);
+        _hashModel->updateCheckSumData(editor->checkSumResult());
     }
+    m_hashtable->raise();
 }
 
 void MainWindow::on_fileInfo() {
@@ -2637,9 +2768,9 @@ void MainWindow::on_exportfindresult() {
         return;
     }
 
-    auto findresitem = editor->findResultModel();
+    auto findresitem = editor->findResult();
 
-    auto c = findresitem->size();
+    auto c = findresitem.results.size();
     if (c == 0) {
         Toast::toast(this, NAMEICONRES(QStringLiteral("export")),
                      tr("EmptyFindResult"));
@@ -2655,29 +2786,21 @@ void MainWindow::on_exportfindresult() {
     if (f.open(QFile::WriteOnly)) {
         QJsonObject fobj;
         fobj.insert(QStringLiteral("file"), editor->fileName());
+        fobj.insert(QStringLiteral("encoding"), findresitem.encoding);
 
-        auto d = findresitem->lastFindData();
+        auto d = findresitem.lastFindData;
 
         fobj.insert(QStringLiteral("find"), d.first);
         QJsonArray arr;
         for (int i = 0; i < c; i++) {
-            auto data = findresitem->resultAt(i);
+            auto data = findresitem.results.at(i);
             QJsonObject jobj;
             jobj.insert(QStringLiteral("line"), QString::number(data.line));
             jobj.insert(QStringLiteral("col"), QString::number(data.col));
             jobj.insert(QStringLiteral("offset"), QString::number(data.offset));
-
-            QTextDocument doc;
-            doc.setHtml(
-                findresitem->data(findresitem->index(i, 3), Qt::DisplayRole)
-                    .toString());
-            jobj.insert(QStringLiteral("range"), doc.toPlainText());
-
-            doc.setHtml(
-                findresitem->data(findresitem->index(i, 4), Qt::DisplayRole)
-                    .toString());
-            jobj.insert(QStringLiteral("encoding"), doc.toPlainText());
-
+            jobj.insert(QStringLiteral("range"), findresitem.generateRange(i));
+            jobj.insert(QStringLiteral("decoding"),
+                        findresitem.generateDecoding(i));
             arr.append(jobj);
         }
         fobj.insert(QStringLiteral("data"), arr);
@@ -2707,112 +2830,7 @@ void MainWindow::on_locChanged() {
                              .arg(sellen)
                              .arg(QString::number(sellen, 16).toUpper()));
 
-    // number analyse
-    auto off = hexeditor->currentOffset();
-    auto d = hexeditor->document();
-
-    constexpr auto maxlen = 32;
-
-    auto tmp = d->read(off, maxlen);
-    quint64 n = *reinterpret_cast<const quint64 *>(tmp.constData());
-
-    auto len = size_t(tmp.length());
-
-    if (len >= sizeof(quint64)) {
-        auto s = processEndian(n);
-        _numsitem->setNumData(
-            NumShowModel::NumTableIndex::Uint64,
-            m_unsignedHex
-                ? QStringLiteral("0x%1").arg(QString::number(s, 16).toUpper())
-                : QString::number(s));
-        auto s1 = processEndian(qsizetype(n));
-        _numsitem->setNumData(NumShowModel::NumTableIndex::Int64,
-                              QString::number(s1));
-        double s2 = *(double *)(&n);
-        auto s3 = processEndian(s2);
-        _numsitem->setNumData(NumShowModel::NumTableIndex::Double64,
-                              qIsNaN(s3) ? QStringLiteral("NAN")
-                                         : QString::number(s3));
-    } else {
-        _numsitem->setNumData(NumShowModel::NumTableIndex::Uint64, QString());
-        _numsitem->setNumData(NumShowModel::NumTableIndex::Int64, QString());
-        _numsitem->setNumData(NumShowModel::NumTableIndex::Double64, QString());
-    }
-
-    if (len >= sizeof(quint32)) {
-        auto s = processEndian(quint32(n));
-        _numsitem->setNumData(
-            NumShowModel::NumTableIndex::Uint32,
-            m_unsignedHex
-                ? QStringLiteral("0x%1").arg(QString::number(s, 16).toUpper())
-                : QString::number(s));
-        auto s1 = processEndian(qint32(n));
-        _numsitem->setNumData(NumShowModel::NumTableIndex::Int32,
-                              QString::number(s1));
-        float s2 = *(float *)(&n);
-        auto s3 = processEndian(s2);
-        _numsitem->setNumData(NumShowModel::NumTableIndex::Float32,
-                              qIsNaN(s3) ? QStringLiteral("NAN")
-                                         : QString::number(s3));
-    } else {
-        _numsitem->setNumData(NumShowModel::NumTableIndex::Uint32, QString());
-        _numsitem->setNumData(NumShowModel::NumTableIndex::Int32, QString());
-        _numsitem->setNumData(NumShowModel::NumTableIndex::Float32, QString());
-    }
-
-    if (len >= sizeof(quint16)) {
-        auto s = processEndian(quint16(n));
-        _numsitem->setNumData(
-            NumShowModel::NumTableIndex::Ushort,
-            m_unsignedHex
-                ? QStringLiteral("0x%1").arg(QString::number(s, 16).toUpper())
-                : QString::number(s));
-        auto s1 = processEndian(qint16(n));
-        _numsitem->setNumData(NumShowModel::NumTableIndex::Short,
-                              QString::number(s1));
-    } else {
-        _numsitem->setNumData(NumShowModel::NumTableIndex::Ushort, QString());
-        _numsitem->setNumData(NumShowModel::NumTableIndex::Short, QString());
-    }
-    if (len >= sizeof(uchar)) {
-        auto s1 = tmp.at(0);
-        auto s = uchar(s1);
-        _numsitem->setNumData(
-            NumShowModel::NumTableIndex::Byte,
-            m_unsignedHex
-                ? QStringLiteral("0x%1").arg(QString::number(s, 16).toUpper())
-                : QString::number(s));
-        _numsitem->setNumData(NumShowModel::NumTableIndex::Char,
-                              QString::number(s1));
-    } else {
-        _numsitem->setNumData(NumShowModel::NumTableIndex::Byte, QString());
-        _numsitem->setNumData(NumShowModel::NumTableIndex::Char, QString());
-    }
-
-    // str
-    if (len > 0) {
-        _numsitem->setNumData(NumShowModel::NumTableIndex::ASCII_STR,
-                              QString::fromLatin1(tmp));
-        _numsitem->setNumData(NumShowModel::NumTableIndex::UTF8_STR,
-                              QString::fromUtf8(tmp));
-        auto re = processEndian(tmp);
-        _numsitem->setNumData(
-            NumShowModel::NumTableIndex::UTF16_STR,
-            QString::fromUtf16(reinterpret_cast<const char16_t *>(re.data()),
-                               re.length() / sizeof(char16_t)));
-        _numsitem->setNumData(
-            NumShowModel::NumTableIndex::UTF32_STR,
-            QString::fromUcs4(reinterpret_cast<const char32_t *>(re.data()),
-                              re.length() / sizeof(char32_t)));
-    } else {
-        _numsitem->setNumData(NumShowModel::NumTableIndex::ASCII_STR,
-                              QString());
-        _numsitem->setNumData(NumShowModel::NumTableIndex::UTF8_STR, QString());
-        _numsitem->setNumData(NumShowModel::NumTableIndex::UTF16_STR,
-                              QString());
-        _numsitem->setNumData(NumShowModel::NumTableIndex::UTF32_STR,
-                              QString());
-    }
+    updateNumberTable();
 
     auto cursor = hexeditor->cursor();
 
@@ -2844,29 +2862,7 @@ void MainWindow::on_selectionChanged() {
         }
     }
 
-    auto total = buffer.size();
-    m_txtDecode->clear();
-
-    for (int i = 0; i < total; i++) {
-        auto b = buffer.at(i);
-
-        if (!isPreview) {
-            m_txtDecode->insertHtml(
-                QStringLiteral("<font color=\"gold\">[ %1 / %2 ]</font><br />")
-                    .arg(i + 1)
-                    .arg(total));
-        }
-
-        if (buffer.length() <= 1024 * _decstrlim) {
-            m_txtDecode->insertPlainText(
-                Utilities::decodingString(b, m_encoding));
-            m_txtDecode->insertPlainText(QStringLiteral("\n"));
-        } else {
-            m_txtDecode->insertHtml(
-                QStringLiteral("<font color=\"red\">%1</font><br />")
-                    .arg(tr("TooManyBytesDecode")));
-        }
-    }
+    updateStringDec(buffer);
 
     PluginSystem::instance().dispatchEvent(
         IWingPlugin::RegisteredEvent::SelectionChanged,
@@ -2890,6 +2886,11 @@ void MainWindow::on_viewtxt() {
         if (ret == QMessageBox::No) {
             return;
         }
+    }
+    if (_showtxt == nullptr) {
+        _showtxt = new ShowTextDialog(this);
+        connect(_showtxt, &ShowTextDialog::destroyed, this,
+                [this]() { _showtxt = nullptr; });
     }
     _showtxt->load(hexeditor->document()->buffer(), mime.name());
 }
@@ -2926,7 +2927,7 @@ void MainWindow::on_saveLayout() {
             menu->addAction(
                 newAction(lm.getSavedLayoutName(fileID), [this, layout]() {
                     showStatus(tr("LayoutRestoring..."));
-                    qApp->processEvents();
+                    updateUI();
                     m_dock->restoreState(layout);
                     showStatus({});
                 }));
@@ -2964,17 +2965,11 @@ void MainWindow::on_inspectQt() {
     InspectQtLogHelper::instance().showLogWidget();
 }
 
-void MainWindow::on_scriptwindow() {
-    Q_ASSERT(m_scriptDialog);
-    m_scriptDialog->show();
-    m_scriptDialog->raise();
-}
+void MainWindow::on_scriptwindow() { createScriptDialog(nullptr); }
 
 void MainWindow::on_settingGeneral() { m_setdialog->showConfig(0); }
 
-void MainWindow::on_settingScript() {
-    m_scriptDialog->settingDialog()->showConfig();
-}
+void MainWindow::on_settingScript() { m_scriptsetdlg->showConfig(); }
 
 void MainWindow::on_settingPlugin() { m_setdialog->showConfig(2); }
 
@@ -3050,6 +3045,8 @@ ads::CDockWidget *MainWindow::buildDockWidget(ads::CDockManager *dock,
                                               const QString &displayName,
                                               QWidget *content,
                                               ToolButtonIndex index) {
+    updateUI();
+
     using namespace ads;
     auto dw = dock->createDockWidget(displayName, dock);
     dw->setObjectName(widgetName);
@@ -3231,6 +3228,7 @@ void MainWindow::connectEditorView(EditorView *editor) {
     connect(editor, &EditorView::sigOnCopyHex, this, &MainWindow::on_copyhex);
     connect(editor, &EditorView::sigOnCutFile, this, &MainWindow::on_cutfile);
     connect(editor, &EditorView::sigOnBookMark, this, &MainWindow::on_bookmark);
+    connect(editor, &EditorView::sigOnCheckSum, this, &MainWindow::on_checksum);
     connect(editor, &EditorView::sigOnCopyFile, this, &MainWindow::on_copyfile);
     connect(editor, &EditorView::sigOnFindFile, this, &MainWindow::on_findfile);
     connect(editor, &EditorView::sigOnGoToLine, this, &MainWindow::on_gotoline);
@@ -3247,7 +3245,8 @@ void MainWindow::connectEditorView(EditorView *editor) {
                 auto total = hexeditor->selectionCount();
                 if (m.exec()) {
                     auto meta = doc->metadata();
-                    meta->beginMarco(tr("[MetaAdd]"));
+                    meta->beginMarco(
+                        QStringLiteral("[M+G] {cnt: %1}").arg(total));
                     for (int i = 0; i < total; ++i) {
                         auto begin = cur->selectionStart(i).offset();
                         auto end = cur->selectionEnd(i).offset();
@@ -3429,22 +3428,9 @@ void MainWindow::swapEditor(EditorView *old, EditorView *cur) {
 
     loadFindResult(cur);
 
-    auto bm = cur->bookmarksModel();
-    m_bookmarks->setModel(bm);
-    connect(m_bookmarks->selectionModel(),
-            &QItemSelectionModel::selectionChanged, m_aDelBookMark,
-            [=](const QItemSelection &, const QItemSelection &) {
-                m_aDelBookMark->setEnabled(
-                    m_bookmarks->selectionModel()->hasSelection());
-            });
-    auto md = cur->metadataModel();
-    m_metadatas->setModel(md);
-    connect(m_metadatas->selectionModel(),
-            &QItemSelectionModel::selectionChanged, m_aDelMetaData,
-            [=](const QItemSelection &, const QItemSelection &) {
-                m_aDelMetaData->setEnabled(
-                    m_metadatas->selectionModel()->hasSelection());
-            });
+    _bookMarkModel->setDocument(doc);
+    _metadataModel->setDocument(doc);
+    _hashModel->updateCheckSumData(cur->checkSumResult());
 
     for (auto &menu : m_hexContextMenu) {
         menu->setProperty("__CONTEXT__", quintptr(cur->editorContext()));
@@ -3472,10 +3458,9 @@ void MainWindow::updateWindowTitle() {
 }
 
 void MainWindow::loadFindResult(EditorView *view) {
-    auto result = view->findResultModel();
-    m_findresult->setModel(result);
-    m_findEncoding.value(result->encoding())->setChecked(true);
-    m_findresult->setProperty("EditorView", QVariant::fromValue(view));
+    auto &result = view->findResult();
+    _findResultModel->updateData(result);
+    m_findEncoding.value(result.encoding)->setChecked(true);
 }
 
 void MainWindow::openFiles(const QStringList &files) {
@@ -3692,6 +3677,12 @@ ErrFile MainWindow::closeEditor(EditorView *editor, bool force) {
     return ErrFile::Success;
 }
 
+void MainWindow::openScriptFile(const QString &filename, SplashDialog *splash) {
+    createScriptDialog(splash);
+    m_scriptDialog->openFile(filename);
+    QTimer::singleShot(100, this, [this] { m_scriptDialog->raise(); });
+}
+
 IWingPlugin::FileType MainWindow::getEditorViewFileType(EditorView *view) {
     Q_ASSERT(view);
 
@@ -3728,6 +3719,17 @@ void MainWindow::updateEditModeEnabled() {
             doc->canUndo());
         setWindowFilePath(editor->fileName());
     } else {
+        for (auto &menu : m_hexContextMenu) {
+            menu->setProperty("__CONTEXT__", {});
+        }
+        _findResultModel->reset();
+        _bookMarkModel->setDocument(nullptr);
+        _metadataModel->setDocument(nullptr);
+        _hashModel->clearData();
+        m_aDelBookMark->setEnabled(false);
+        m_aDelMetaData->setEnabled(false);
+        _undoView->setStack(nullptr);
+
         m_lblloc->setText(QStringLiteral("(0,0)"));
         m_lblsellen->setText(QStringLiteral("0 - 0x0"));
         _numsitem->clear();
@@ -3857,6 +3859,202 @@ void MainWindow::saveTableContent(QAbstractItemModel *model) {
                  tr("SaveSuccessfully"));
 }
 
+void MainWindow::updateNumberTable() {
+    if (!m_numshowtable->isVisible()) {
+        return;
+    }
+
+    auto hexeditor = currentHexView();
+    if (hexeditor == nullptr) {
+        return;
+    }
+
+    // lazy loading
+    static QHexView *lastView = nullptr;
+    static qsizetype lastOff = -1;
+    auto off = hexeditor->currentOffset();
+    if (lastView == hexeditor && lastOff == off) {
+        return;
+    } else {
+        lastView = hexeditor;
+        lastOff = off;
+    }
+
+    auto d = hexeditor->document();
+
+    constexpr auto maxlen = 32;
+
+    auto tmp = d->read(off, maxlen);
+    quint64 n = *reinterpret_cast<const quint64 *>(tmp.constData());
+
+    auto len = size_t(tmp.length());
+
+    if (len >= sizeof(quint64)) {
+        auto s = processEndian(n);
+        _numsitem->setNumData(
+            NumShowModel::NumTableIndex::Uint64,
+            m_unsignedHex
+                ? QStringLiteral("0x%1").arg(QString::number(s, 16).toUpper())
+                : QString::number(s));
+        auto s1 = processEndian(qsizetype(n));
+        _numsitem->setNumData(NumShowModel::NumTableIndex::Int64,
+                              QString::number(s1));
+        double s2 = *(double *)(&n);
+        auto s3 = processEndian(s2);
+        _numsitem->setNumData(NumShowModel::NumTableIndex::Double64,
+                              qIsNaN(s3) ? QStringLiteral("NAN")
+                                         : QString::number(s3));
+    } else {
+        _numsitem->setNumData(NumShowModel::NumTableIndex::Uint64, QString());
+        _numsitem->setNumData(NumShowModel::NumTableIndex::Int64, QString());
+        _numsitem->setNumData(NumShowModel::NumTableIndex::Double64, QString());
+    }
+
+    if (len >= sizeof(quint32)) {
+        auto s = processEndian(quint32(n));
+        _numsitem->setNumData(
+            NumShowModel::NumTableIndex::Uint32,
+            m_unsignedHex
+                ? QStringLiteral("0x%1").arg(QString::number(s, 16).toUpper())
+                : QString::number(s));
+        auto s1 = processEndian(qint32(n));
+        _numsitem->setNumData(NumShowModel::NumTableIndex::Int32,
+                              QString::number(s1));
+        float s2 = *(float *)(&n);
+        auto s3 = processEndian(s2);
+        _numsitem->setNumData(NumShowModel::NumTableIndex::Float32,
+                              qIsNaN(s3) ? QStringLiteral("NAN")
+                                         : QString::number(s3));
+    } else {
+        _numsitem->setNumData(NumShowModel::NumTableIndex::Uint32, QString());
+        _numsitem->setNumData(NumShowModel::NumTableIndex::Int32, QString());
+        _numsitem->setNumData(NumShowModel::NumTableIndex::Float32, QString());
+    }
+
+    if (len >= sizeof(quint16)) {
+        auto s = processEndian(quint16(n));
+        _numsitem->setNumData(
+            NumShowModel::NumTableIndex::Ushort,
+            m_unsignedHex
+                ? QStringLiteral("0x%1").arg(QString::number(s, 16).toUpper())
+                : QString::number(s));
+        auto s1 = processEndian(qint16(n));
+        _numsitem->setNumData(NumShowModel::NumTableIndex::Short,
+                              QString::number(s1));
+    } else {
+        _numsitem->setNumData(NumShowModel::NumTableIndex::Ushort, QString());
+        _numsitem->setNumData(NumShowModel::NumTableIndex::Short, QString());
+    }
+    if (len >= sizeof(uchar)) {
+        auto s1 = tmp.at(0);
+        auto s = uchar(s1);
+        _numsitem->setNumData(
+            NumShowModel::NumTableIndex::Byte,
+            m_unsignedHex
+                ? QStringLiteral("0x%1").arg(QString::number(s, 16).toUpper())
+                : QString::number(s));
+        _numsitem->setNumData(NumShowModel::NumTableIndex::Char,
+                              QString::number(s1));
+    } else {
+        _numsitem->setNumData(NumShowModel::NumTableIndex::Byte, QString());
+        _numsitem->setNumData(NumShowModel::NumTableIndex::Char, QString());
+    }
+
+    // str
+    if (len > 0) {
+        _numsitem->setNumData(NumShowModel::NumTableIndex::ASCII_STR,
+                              QString::fromLatin1(tmp));
+        _numsitem->setNumData(NumShowModel::NumTableIndex::UTF8_STR,
+                              QString::fromUtf8(tmp));
+        auto re = processEndian(tmp);
+        _numsitem->setNumData(
+            NumShowModel::NumTableIndex::UTF16_STR,
+            QString::fromUtf16(reinterpret_cast<const char16_t *>(re.data()),
+                               re.length() / sizeof(char16_t)));
+        _numsitem->setNumData(
+            NumShowModel::NumTableIndex::UTF32_STR,
+            QString::fromUcs4(reinterpret_cast<const char32_t *>(re.data()),
+                              re.length() / sizeof(char32_t)));
+    } else {
+        _numsitem->setNumData(NumShowModel::NumTableIndex::ASCII_STR,
+                              QString());
+        _numsitem->setNumData(NumShowModel::NumTableIndex::UTF8_STR, QString());
+        _numsitem->setNumData(NumShowModel::NumTableIndex::UTF16_STR,
+                              QString());
+        _numsitem->setNumData(NumShowModel::NumTableIndex::UTF32_STR,
+                              QString());
+    }
+}
+
+void MainWindow::updateStringDec(const QByteArrayList &content) {
+    if (!m_txtDecode->isVisible()) {
+        return;
+    }
+
+    QByteArrayList buffer = content;
+    bool isPreview = false;
+
+    if (content.isEmpty()) {
+        auto hexeditor = currentHexView();
+        if (hexeditor == nullptr) {
+            return;
+        }
+
+        auto cursor = hexeditor->cursor();
+        if (cursor->previewSelectionMode() != QHexCursor::SelectionRemove &&
+            cursor->hasPreviewSelection()) {
+            buffer.append(hexeditor->previewSelectedBytes());
+            isPreview = true;
+        }
+
+        if (buffer.isEmpty()) {
+            if (hexeditor->selectionCount() > 0) {
+                buffer = hexeditor->selectedBytes();
+            }
+        }
+    }
+
+    auto total = buffer.size();
+    m_txtDecode->clear();
+    for (int i = 0; i < total; i++) {
+        auto b = buffer.at(i);
+        if (!isPreview) {
+            m_txtDecode->insertHtml(
+                QStringLiteral("<font color=\"gold\">[ %1 / %2 ]</font><br />")
+                    .arg(i + 1)
+                    .arg(total));
+        }
+
+        if (buffer.length() <= 1024 * _decstrlim) {
+            m_txtDecode->insertPlainText(
+                Utilities::decodingString(b, m_encoding));
+            m_txtDecode->insertPlainText(QStringLiteral("\n"));
+        } else {
+            m_txtDecode->insertHtml(
+                QStringLiteral("<font color=\"red\">%1</font><br />")
+                    .arg(tr("TooManyBytesDecode")));
+        }
+    }
+}
+
+void MainWindow::updateUI() { QApplication::processEvents(); }
+
+void MainWindow::createScriptDialog(SplashDialog *d) {
+    if (m_scriptDialog == nullptr) {
+        auto splash = d ? d : new SplashDialog(this);
+        splash->setInfoText(tr("SetupScriptEditor"));
+
+        m_scriptDialog = new ScriptingDialog(m_scriptsetdlg, this);
+        connect(m_scriptDialog, &ScriptingDialog::destroyed, this,
+                [this]() { m_scriptDialog = nullptr; });
+        m_scriptDialog->initConsole();
+
+        splash->close();
+    }
+    m_scriptDialog->show();
+    m_scriptDialog->raise();
+}
+
 QHexView *MainWindow::currentHexView() {
     auto editor = currentEditor();
     if (editor == nullptr) {
@@ -3981,8 +4179,50 @@ void MainWindow::onOutputBgScriptOutput(
     }
 }
 
-void MainWindow::closeEvent(QCloseEvent *event) {
+void MainWindow::restoreLayout(const QByteArray &layout) {
+    showStatus(tr("LayoutRestoring..."));
+    updateUI();
 
+    if (m_views.isEmpty()) {
+        m_dock->restoreState(layout);
+    } else {
+        auto curEditor = m_curEditor;
+
+        // remove temperaily
+        QVector<EditorView *> hiddenView;
+        for (auto pview = m_views.keyBegin(); pview != m_views.keyEnd();
+             pview++) {
+            auto view = *pview;
+            if (view->isClosed()) {
+                hiddenView.append(view);
+            }
+            m_dock->removeDockWidget(*pview);
+        }
+
+        m_dock->restoreState(layout);
+
+        // add back
+        auto centeralWidget = m_dock->centralWidget();
+        auto area = centeralWidget->dockAreaWidget();
+        for (auto pview = m_views.keyBegin(); pview != m_views.keyEnd();
+             pview++) {
+            auto view = *pview;
+            m_dock->addDockWidget(ads::CenterDockWidgetArea, view, area);
+            if (hiddenView.contains(view)) {
+                view->toggleView(false);
+            }
+        }
+
+        if (curEditor) {
+            curEditor->raise();
+            curEditor->setFocus();
+        }
+    }
+
+    showStatus({});
+}
+
+void MainWindow::closeEvent(QCloseEvent *event) {
     // plugin first checking
     auto closing = PluginSystem::instance().dispatchEvent(
         IWingPlugin::RegisteredEvent::AppClosing, {});
@@ -4000,7 +4240,12 @@ void MainWindow::closeEvent(QCloseEvent *event) {
 
         // then abort all script running
         ScriptMachine::instance().abortScript();
+        m_scriptDialog->close();
     }
+
+    auto &lsp = AngelLsp::instance();
+    lsp.blockSignals(true);
+    lsp.shutdownAndExit();
 
     // then checking itself
     if (!m_views.isEmpty()) {
@@ -4050,11 +4295,7 @@ void MainWindow::closeEvent(QCloseEvent *event) {
 
     auto &set = SettingManager::instance();
     set.setDockLayout(m_dock->saveState());
-
-    if (m_scriptDialog) {
-        m_scriptDialog->saveDockLayout();
-        set.setRecentFiles(m_recentmanager->saveRecent());
-    }
+    set.setRecentFiles(m_recentmanager->saveRecent());
 
     PluginSystem::instance().destory();
 

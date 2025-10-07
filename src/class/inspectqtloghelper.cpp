@@ -41,6 +41,10 @@ void InspectQtLogHelper::init() {
     });
     menu->insertAction(af, a);
 
+    for (auto &a : ma) {
+        a->setEnabled(true);
+    }
+
     QObject::connect(_ctx, &QTextBrowser::customContextMenuRequested, qApp,
                      [menu, this](const QPoint &pos) {
                          menu->popup(_ctx->mapToGlobal(pos));
@@ -49,6 +53,7 @@ void InspectQtLogHelper::init() {
     _logger->buildUpContent(_ctx);
     _logger->setWindowTitle(tr("Inspect"));
     _logger->setWindowIcon(ICONRES("qtloginspect"));
+    _logger->setMinimumSize(400, 350);
 
     qSetMessagePattern(QStringLiteral("%{if-debug}[Debug]%{endif}"
                                       "%{if-warning}[Warn]%{endif}"

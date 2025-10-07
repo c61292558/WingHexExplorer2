@@ -19,6 +19,7 @@
 #define ASCONSOLECOMPLETION_H
 
 #include "ascompletion.h"
+#include "control/consolecodeedit.h"
 
 class ScriptingConsole;
 
@@ -26,14 +27,15 @@ class AsConsoleCompletion : public AsCompletion {
     Q_OBJECT
 public:
     explicit AsConsoleCompletion(ScriptingConsole *p);
+    explicit AsConsoleCompletion(ConsoleCodeEdit *p);
     virtual ~AsConsoleCompletion() = default;
 
 protected:
-    virtual QList<CodeInfoTip> parseDocument() override;
     virtual QList<CodeInfoTip> parseMarcos() override;
+    virtual LspEditorInterace *getEditor() override;
 
 private:
-    ScriptingConsole *_console;
+    LspEditorInterace *_console;
 };
 
 #endif // ASCONSOLECOMPLETION_H

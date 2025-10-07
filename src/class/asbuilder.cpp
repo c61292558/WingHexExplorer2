@@ -32,9 +32,11 @@ int asBuilder::build(asIScriptModule *module) {
 
     module->ResetGlobalVars();
 
-    for (auto &mod : modifiedScripts) {
-        module->AddScriptSection(mod.section.toUtf8(), mod.script.data(),
-                                 mod.script.size());
+    auto sc = scriptData();
+    for (auto &&[section, data] : sc.asKeyValueRange()) {
+        auto script = data.script.toUtf8();
+        module->AddScriptSection(section.toUtf8(), script.data(),
+                                 script.size());
     }
 
     int r = module->Build();

@@ -194,25 +194,12 @@ fragment HexadecimalDigit
     : [0-9a-fA-F]
     ;
 
-fragment FractionalConstant
-    : DigitSequence? '.' DigitSequence
-    | DigitSequence '.'
-    ;
-
-fragment ExponentPart
-    : [eE] Sign? DigitSequence
-    ;
-
 fragment Sign
     : [+-]
     ;
 
 fragment DigitSequence
     : Digit+
-    ;
-
-fragment BinaryExponentPart
-    : [pP] Sign? DigitSequence
     ;
 
 fragment HexadecimalDigitSequence

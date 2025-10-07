@@ -18,8 +18,8 @@
 #ifndef CODEEDIT_H
 #define CODEEDIT_H
 
-#include "WingCodeEdit/wingcodeedit.h"
-#include "control/gotolinewidget.h"
+#include "gotolinewidget.h"
+#include "wingcodeedit.h"
 
 class SearchReplaceWidget;
 
@@ -53,6 +53,9 @@ protected:
     virtual void resizeEvent(QResizeEvent *event) override;
     virtual void keyPressEvent(QKeyEvent *event) override;
     virtual void contextMenuEvent(QContextMenuEvent *event) override;
+
+    virtual void mousePressEvent(QMouseEvent *e) override;
+    virtual void wheelEvent(QWheelEvent *e) override;
 
 private slots:
     void applyEditorSetStyle();

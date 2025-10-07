@@ -21,6 +21,8 @@
 #include "AngelScript/sdk/add_on/contextmgr/contextmgr.h"
 #include "AngelScript/sdk/angelscript/include/angelscript.h"
 
+#include "WingPlugin/iwingangel.h"
+#include "as-debugger/as_debugger.h"
 #include "class/aspreprocesser.h"
 
 #include "asdebugger.h"
@@ -30,11 +32,8 @@
 
 class CScriptArray;
 
-class ScriptMachine : public QObject {
-    Q_OBJECT
-private:
-    using TranslateFunc = std::function<QString(const QStringList &)>;
-
+class ScriptMachine {
+    Q_GADGET
 public:
     // we have three console modes
     enum ConsoleMode {
@@ -49,29 +48,11 @@ public:
     struct MessageInfo {
         ConsoleMode mode = ConsoleMode::Background;
         QString section;
-        int row = -1;
-        int col = -1;
+        qint64 row = -1;
+        qint64 col = -1;
         MessageType type = MessageType::Info;
         QString message;
     };
-
-    enum RegisteredType {
-        tString,
-        tChar,
-        tArray,
-        tComplex,
-        tWeakref,
-        tConstWeakref,
-        tAny,
-        tDictionary,
-        tDictionaryValue,
-        tGrid,
-        tRef,
-        tColor,
-        tMAXCOUNT
-    };
-
-    asITypeInfo *typeInfo(RegisteredType type) const;
 
 public:
     // only for refection
@@ -112,15 +93,19 @@ public:
     static ScriptMachine &instance();
     void destoryMachine();
 
+    void setCustomEvals(
+        const QHash<std::string, WingHex::IWingAngel::Evaluator> &evals);
+
 public:
     bool init();
     bool isInited() const;
     bool isRunning(ConsoleMode mode) const;
-    bool isEngineConfigError() const;
+    bool checkEngineConfigError() const;
 
     static void registerEngineAddon(asIScriptEngine *engine);
     static void registerEngineAssert(asIScriptEngine *engine);
     static void registerEngineClipboard(asIScriptEngine *engine);
+    static void registerEngineDebug(asIScriptEngine *engine);
 
     void registerCallBack(ConsoleMode mode, const RegCallBacks &callbacks);
 
@@ -150,13 +135,16 @@ public:
     // debug or release?
     bool isDebugMode(ConsoleMode mode = Scripting);
 
-public slots:
+public:
     bool executeCode(ScriptMachine::ConsoleMode mode, const QString &code);
     // only scripting mode can be debugged
-    bool executeScript(ScriptMachine::ConsoleMode mode, const QString &script,
-                       bool isInDebug = false, int *retCode = nullptr);
+    bool executeScript(
+        ScriptMachine::ConsoleMode mode, const QString &script,
+        bool isInDebug = false, int *retCode = nullptr,
+        std::function<void(const QHash<QString, AsPreprocesser::Result> &)>
+            sections = {});
 
-    int evaluateDefine(const QString &code, bool &result);
+    QVariant evaluateDefine(const QString &code);
 
     void abortDbgScript();
     void abortScript(ScriptMachine::ConsoleMode mode);
@@ -164,6 +152,8 @@ public slots:
 
 protected:
     bool configureEngine();
+    void beginEvaluateDefine();
+    void endEvaluateDefine();
 
     QString getCallStack(asIScriptContext *context);
 
@@ -173,19 +163,16 @@ private:
 
     QString getInput();
 
-    bool isType(asITypeInfo *tinfo, RegisteredType type);
-
     static int execSystemCmd(QString &out, const QString &exe,
                              const QString &params, int timeout);
 
     static QString beautify(const QString &str, uint indent);
 
     QString stringify(void *ref, int typeId);
+    QString stringify_helper(const std::shared_ptr<asIDBVariable> &var);
 
 private:
     static void messageCallback(const asSMessageInfo *msg, void *param);
-
-    static void cleanUpDbgContext(asIScriptContext *context);
 
     static void cleanUpPluginSysIDFunction(asIScriptFunction *fn);
 
@@ -194,35 +181,39 @@ private:
     static void returnContextCallback(asIScriptEngine *engine,
                                       asIScriptContext *ctx, void *param);
 
-    static int pragmaCallback(const QByteArray &pragmaText,
-                              AsPreprocesser *builder,
-                              const QString &sectionname, void *userParam);
+    static std::optional<WingHex::PragmaResult>
+    pragmaCallback(const QString &pragmaText, AsPreprocesser *builder,
+                   const QString &sectionname);
 
-    static int includeCallback(const QString &include, bool quotedInclude,
-                               const QString &from, AsPreprocesser *builder,
-                               void *userParam);
+    static void debug_break();
 
-    static QString processTranslation(const char *content,
-                                      ScriptMachine *machine);
+    static QString debug_backtrace();
 
     void exceptionCallback(asIScriptContext *context);
 
-    Q_DECL_UNUSED void translation();
-
-signals:
-    void onDebugFinished();
+private:
+    void attachDebugBreak(asIScriptContext *ctx);
 
 private:
     asIScriptEngine *_engine = nullptr;
-    asDebugger *_debugger = nullptr;
     CContextMgr *_ctxMgr = nullptr;
+    asIScriptModule *_eMod = nullptr;
 
     QQueue<asIScriptContext *> _ctxPool;
 
-    QVector<asITypeInfo *> _rtypes;
     QMap<ConsoleMode, RegCallBacks> _regcalls;
     QMap<ConsoleMode, asIScriptContext *> _ctx;
-    ConsoleMode _curMsgMode = ConsoleMode::Background;
+    ConsoleMode _curMsgMode = ConsoleMode::Interactive;
+
+    qint64 lineOffset = 0;
+    qint64 colOffset = 0;
+
+private:
+    void checkDebugger(asIScriptContext *ctx);
+
+private:
+    asDebugger *_debugger = nullptr;
+    asIDBWorkspace *_workspace = nullptr;
 };
 
 Q_DECLARE_METATYPE(ScriptMachine::MessageInfo)

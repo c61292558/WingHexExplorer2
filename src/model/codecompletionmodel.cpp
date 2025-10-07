@@ -36,11 +36,12 @@ QVariant CodeCompletionModel::data(const QModelIndex &index, int role) const {
     case Qt::UserRole:
         return info.name;
     case Qt::DisplayRole:
-        return info.getDisplayStr();
+        return info.name;
     case Qt::ToolTipRole:
-        return info.getTooltip();
+        info.resolve();
+        return info.comment;
     case Qt::DecorationRole:
-        return CodeInfoTip::getDisplayIcon(info.type, info.visualpo);
+        return CodeInfoTip::getDisplayIcon(info.type);
     }
 
     return {};

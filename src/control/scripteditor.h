@@ -19,29 +19,40 @@
 #define SCRIPTEDITOR_H
 
 #include "Qt-Advanced-Docking-System/src/DockWidget.h"
+#include "class/lspeditorinterface.h"
+#include "class/resettabletimer.h"
 #include "control/codeedit.h"
 
 #include <QFileSystemWatcher>
 
 class asIScriptEngine;
 
-class ScriptEditor : public ads::CDockWidget {
+class ScriptEditor : public ads::CDockWidget, public LspEditorInterace {
     Q_OBJECT
 
 public:
     explicit ScriptEditor(QWidget *parent = nullptr);
     virtual ~ScriptEditor();
 
-    QString fileName() const;
-
     CodeEdit *editor() const;
 
     bool formatCode();
 
+    quint64 getVersion() const;
+
+    QString fileName() const;
+
+public:
+    virtual QString lspFileNameURL() const override;
+    virtual bool isContentLspUpdated() const override;
+    virtual CursorPos currentPosition() const override;
+    virtual void showFunctionTip(
+        const QList<WingSignatureTooltip::Signature> &sigs) override;
+    virtual void clearFunctionTip() override;
+    virtual void sendDocChange() override;
+
 signals:
     void onToggleMark(int line);
-    void onFunctionTip(const QString &tip);
-
     void need2Reload();
 
 public slots:
@@ -55,12 +66,24 @@ public slots:
     void replace();
     void gotoLine();
 
+    void onReconnectLsp();
+    void setCompleterEnabled(bool b);
+
+private slots:
+    void onSendFullTextChangeCompleted();
+
 private:
     void processTitle();
 
+    bool increaseVersion();
+
 private:
     CodeEdit *m_editor = nullptr;
-    QString m_fileName;
+    quint64 version = 1;
+
+    ResettableTimer *_timer;
+    bool _ok = true;
+    bool _lastSent = true;
 
     QFileSystemWatcher _watcher;
 };

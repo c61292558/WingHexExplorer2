@@ -20,6 +20,7 @@
 
 #include <QAbstractButton>
 #include <QApplication>
+#include <QBuffer>
 #include <QCryptographicHash>
 #include <QFile>
 #include <QFileIconProvider>
@@ -34,7 +35,9 @@
 #include <QStorageInfo>
 #include <QStyle>
 #include <QTableView>
+#include <QTreeView>
 #include <QWidget>
+#include <QtEndian>
 
 #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
 #include <QStringDecoder>
@@ -202,10 +205,64 @@ public:
         return {};
     }
 
-    static bool checkIsLittleEndian() {
-        short s = 0x1122;
-        auto l = *reinterpret_cast<char *>(&s);
-        return l == 0x22;
+    static QByteArray getMd5(const QByteArray &data) {
+        QCryptographicHash hash(QCryptographicHash::Md5);
+        hash.addData(data);
+        return hash.result();
+    }
+
+    static constexpr bool checkIsLittleEndian() {
+#if WING_LITTLE_ENDIAN
+        return true;
+#else
+        return false;
+#endif
+    }
+
+    template <typename T>
+    static inline T qToBigEndian(T source) {
+        return ::qToBigEndian(source);
+    }
+
+    template <typename T>
+    static inline T qToLittleEndian(T source) {
+        return ::qToLittleEndian(source);
+    }
+
+    static inline QByteArray qToBigEndian(QByteArray source) {
+        QByteArray result;
+        QBuffer buffer(&result);
+        buffer.open(QIODevice::WriteOnly);
+
+        QDataStream stream(&buffer);
+        stream.setByteOrder(QDataStream::BigEndian);
+        stream.writeRawData(source.constData(), source.size());
+        return result;
+    }
+
+    static inline QByteArray qToLittleEndian(QByteArray source) {
+        QByteArray result;
+        QBuffer buffer(&result);
+        buffer.open(QIODevice::WriteOnly);
+
+        QDataStream stream(&buffer);
+        stream.setByteOrder(QDataStream::LittleEndian);
+        stream.writeRawData(source.constData(), source.size());
+        return result;
+    }
+
+    template <typename T>
+    static inline T processEndian(T source, bool isLitteEndian) {
+        if (checkIsLittleEndian()) {
+            if (!isLitteEndian) {
+                return qToBigEndian(source);
+            }
+        } else {
+            if (isLitteEndian) {
+                return qToLittleEndian(source);
+            }
+        }
+        return source;
     }
 
     static QIcon getIconFromFile(QStyle *style, const QString &filename) {
@@ -235,7 +292,7 @@ public:
 
     static bool isTextFile(const QFileInfo &info) {
         QMimeDatabase db;
-        auto t = db.mimeTypeForFile(info);
+        auto t = db.mimeTypeForFile(info, QMimeDatabase::MatchContent);
         return isTextFile(t);
     }
 
@@ -244,16 +301,29 @@ public:
             QStandardPaths::AppDataLocation);
     }
 
-    static void applyTableViewProperty(QTableView *view) {
+    static void applyItemViewProperty(QAbstractItemView *view) {
         view->setEditTriggers(QTableView::EditTrigger::NoEditTriggers);
         view->setSelectionMode(QAbstractItemView::SingleSelection);
         view->setSelectionBehavior(
             QAbstractItemView::SelectionBehavior::SelectRows);
         view->setFocusPolicy(Qt::StrongFocus);
+        view->setAlternatingRowColors(true);
+    }
+
+    static void applyTableViewProperty(QTableView *view) {
+        applyItemViewProperty(view);
         view->verticalHeader()->setDefaultAlignment(Qt::AlignCenter);
         auto hheader = view->horizontalHeader();
         hheader->setStretchLastSection(true);
         hheader->setHighlightSections(false);
+    }
+
+    static void applyTreeViewProperty(QTreeView *view) {
+        applyItemViewProperty(view);
+        view->setRootIsDecorated(true);
+        view->setUniformRowHeights(true);
+        auto hheader = view->header();
+        hheader->setDefaultAlignment(Qt::AlignCenter);
     }
 
     template <typename T>
@@ -329,6 +399,15 @@ public:
             }
         }
         return true;
+    }
+
+    static QString getUrlString(const QString &fileName) {
+        return QUrl::fromLocalFile(fileName).toString(QUrl::FullyEncoded);
+    }
+
+    static QString getASPredefPath() {
+        QDir datap(Utilities::getAppDataPath());
+        return datap.absoluteFilePath(QStringLiteral("as.predefined"));
     }
 };
 
